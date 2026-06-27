@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Crimson Text", Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-display: "Playfair Display", Georgia, serif;
+  --font-gothic: "UnifrakturMaguntia", cursive;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --color-ink: #0a0a0a;
+  --color-navy: #111111;
+  --color-midnight: #080808;
+  --color-paper: #e0e0e0;
+  --color-blood: #721c24;
+  --color-blood-light: #922c35;
+  --color-gold: #888888;
+  --color-gold-light: #a0a0a0;
+}
+
+/* Custom Base Utilities */
+@layer base {
+  body {
+    background-color: #080808;
+    color: #e0e0e0;
+    transition: background-color 0.3s, color 0.3s;
+  }
+  
+  /* Academic journal styling */
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.025em;
+  }
+
+  p {
+    font-family: var(--font-serif);
+    line-height: 1.85;
+  }
+}
+
+/* Scrollbar Customization */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #080808;
+}
+::-webkit-scrollbar-thumb {
+  background: #721c24;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #922c35;
+}
+
+/* Quill custom styles override to match our theme */
+.ql-editor {
+  font-family: var(--font-serif) !important;
+  font-size: 1.1rem !important;
+  line-height: 1.85 !important;
+  color: #e0e0e0 !important;
+  background-color: #111111 !important;
+  min-height: 350px;
+}
+
+.ql-toolbar {
+  background-color: #0a0a0a !important;
+  border-color: rgba(224, 224, 224, 0.15) !important;
+}
+
+.ql-container {
+  border-color: rgba(224, 224, 224, 0.15) !important;
+  background-color: #111111 !important;
+}
+
+.ql-snow .ql-stroke {
+  stroke: #e0e0e0 !important;
+}
+
+.ql-snow .ql-fill {
+  fill: #e0e0e0 !important;
+}
+
+.ql-snow .ql-picker {
+  color: #e0e0e0 !important;
+}
+
+.ql-snow .ql-picker-options {
+  background-color: #0a0a0a !important;
+  color: #e0e0e0 !important;
+}
+
+/* Fade-in transitions */
+.fade-in {
+  animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

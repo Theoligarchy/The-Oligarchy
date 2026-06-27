@@ -1,0 +1,6 @@
+{
+  "name": "The Oligarchy",
+  "description": "An independent research publication exploring crime, human behavior, and systems of power.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
