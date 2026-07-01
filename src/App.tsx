@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import Fuse from 'fuse.js';
 import { db, auth, seedInitialDataIfEmpty } from './firebase';
 import { 
   collection, 
@@ -171,33 +172,39 @@ export default function App() {
     }
   };
 
-  // Filter calculations
-  const filteredArticles = articles.filter(art => {
-    // Skip drafts for public view unless admin is logged in and viewing admin panel
-    if (art.status === 'draft') return false;
+  // Filter calculations using Fuse.js for high-performance fuzzy searching
+  const filteredArticles = useMemo(() => {
+    // 1. Get base articles (skip drafts for public view)
+    let list = articles.filter(art => art.status !== 'draft');
 
-    // Search query matches
+    // 2. Apply Category filter
+    if (categoryFilter !== 'all') {
+      if (categoryFilter === 'criminology' || categoryFilter === 'psyche' || categoryFilter === 'politics') {
+        list = list.filter(art => art.category === categoryFilter);
+      } else if (categoryFilter === 'case-studies') {
+        list = list.filter(art => (art.tags || []).some(t => t.toLowerCase().includes('case study')));
+      } else if (categoryFilter === 'research-notes') {
+        list = list.filter(art => (art.tags || []).some(t => t.toLowerCase().includes('research note')) || art.readTime.includes('3 min') || art.readTime.includes('4 min'));
+      }
+    }
+
+    // 3. Apply Fuzzy Search if searchQuery exists
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchesTitle = art.title.toLowerCase().includes(q);
-      const matchesExcerpt = art.excerpt.toLowerCase().includes(q);
-      const matchesTags = (art.tags || []).some(t => t.toLowerCase().includes(q));
-      if (!matchesTitle && !matchesExcerpt && !matchesTags) return false;
+      const fuse = new Fuse(list, {
+        keys: [
+          { name: 'title', weight: 0.5 },
+          { name: 'subtitle', weight: 0.3 },
+          { name: 'excerpt', weight: 0.2 },
+          { name: 'tags', weight: 0.3 }
+        ],
+        threshold: 0.45,
+        ignoreLocation: true
+      });
+      return fuse.search(searchQuery).map(result => result.item);
     }
 
-    // Category filter matches
-    if (categoryFilter === 'all') return true;
-    if (categoryFilter === 'criminology' || categoryFilter === 'psyche' || categoryFilter === 'politics') {
-      return art.category === categoryFilter;
-    }
-    if (categoryFilter === 'case-studies') {
-      return art.tags.some(t => t.toLowerCase().includes('case study'));
-    }
-    if (categoryFilter === 'research-notes') {
-      return art.tags.some(t => t.toLowerCase().includes('research note')) || art.readTime.includes('3 min') || art.readTime.includes('4 min');
-    }
-    return true;
-  });
+    return list;
+  }, [articles, categoryFilter, searchQuery]);
 
   const featuredPost = articles.find(art => art.isFeatured && art.status === 'published');
 

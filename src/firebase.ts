@@ -1,6 +1,7 @@
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getFirestore, collection, getDocs, doc, setDoc, query, where, orderBy, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 import { Article, ReadingItem, ResearchTip, NewsletterSubscriber } from './types';
 
 // Read configuration
@@ -18,8 +19,9 @@ const firebaseConfig = {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 const auth = getAuth(app);
+const storage = getStorage(app);
 
-export { app, db, auth };
+export { app, db, auth, storage };
 
 // Seed initial articles if Firestore is empty
 export async function seedInitialDataIfEmpty() {
