@@ -111,6 +111,162 @@ export default function AboutSection() {
           </div>
         </div>
       </div>
+
+      {/* Editorial Divider Line */}
+      <div className="w-full h-[1px] bg-paper/10 mt-24 mb-20" />
+
+      {/* Founder's Essay Section */}
+      <div className="max-w-3xl mx-auto text-left select-text">
+        {/* Section Label */}
+        <div className="font-sans text-[10px] font-semibold tracking-[0.35em] uppercase text-blood-light mb-4 flex items-center justify-center gap-3">
+          <span className="w-6 h-px bg-blood-light/40" />
+          Founder's Essay
+          <span className="w-6 h-px bg-blood-light/40" />
+        </div>
+
+        {/* Main Heading */}
+        <h2 className="font-display text-4xl md:text-5xl font-normal italic text-paper text-center mb-4 tracking-tight">
+          Why I Founded The Oligarchy
+        </h2>
+
+        {/* Subheading */}
+        <p className="font-serif text-lg md:text-xl text-paper/60 text-center italic max-w-xl mx-auto mb-16 leading-relaxed">
+          "The simple answer is that it began with curiosity."
+        </p>
+
+        {/* Long-form Essay Body */}
+        <div className="font-serif text-base md:text-lg text-paper/75 leading-relaxed space-y-8">
+          <p>
+            It was not a sudden decision, but a slow realization. A quiet progression of questions that began to demand answers—or if not answers, at least an honest, rigorous framework through which to examine them.
+          </p>
+
+          <p>
+            It began with crime. As an observer of behavior, I wanted to understand what drives individuals to step outside the boundaries of society, to commit acts that others deem unthinkable. But crime does not exist in a vacuum. It is a symptom of a deeper, quieter machinery.
+          </p>
+
+          {/* Important Editorial Moment 1 */}
+          <div className="border-l border-blood pl-4 py-1 my-6">
+            <span className="font-display text-lg md:text-xl font-medium italic text-paper tracking-tight">
+              Crime led to psychology. Psychology led to politics.
+            </span>
+          </div>
+
+          {/* Centered Distinct Question 1 */}
+          <div className="my-12 py-8 border-y border-paper/5 flex flex-col items-center">
+            <span className="font-sans text-[9px] tracking-widest text-blood uppercase mb-2">Contemplation</span>
+            <p className="font-display text-xl md:text-2xl text-paper font-normal italic text-center max-w-lg">
+              "Why do some people become violent?"
+            </p>
+          </div>
+
+          <p>
+            No single discipline can explain the sheer complexity of human systems. To study the mind without studying the architecture of the state is to ignore the shape of the cage; to study the state without studying the mind is to ignore the animal inside.
+          </p>
+
+          {/* Important Editorial Moment 2 */}
+          <div className="border-l border-blood pl-4 py-1 my-6">
+            <span className="font-display text-lg md:text-xl font-medium italic text-paper tracking-tight">
+              Everything influences everything else.
+            </span>
+          </div>
+
+          <p>
+            In our public discourse, we are constantly presented with pre-packaged conclusions. We are urged to react immediately, to choose sides, and to feel outraged before we even understand the underlying incentives at play. But outrage is exhausting, and it rarely solves the structural failures of our societies.
+          </p>
+
+          {/* Important Editorial Moment 3 */}
+          <div className="border-l border-blood pl-4 py-1 my-6">
+            <span className="font-display text-lg md:text-xl font-medium italic text-paper tracking-tight">
+              Understanding began to feel more valuable than outrage.
+            </span>
+          </div>
+
+          {/* Centered Distinct Question 2 */}
+          <div className="my-12 py-8 border-y border-paper/5 flex flex-col items-center">
+            <span className="font-sans text-[9px] tracking-widest text-blood uppercase mb-2">Inquiry</span>
+            <p className="font-display text-xl md:text-2xl text-paper font-normal italic text-center max-w-lg">
+              "Why do institutions fail?"
+            </p>
+          </div>
+
+          <p>
+            This shift in perspective completely changed how I approached research. Instead of searching for convenient villains, I began looking for incentives. Instead of seeking simple, comforting answers, I looked for systemic feedback loops. Eventually, I realized that some of the most profound truths lie in the gray areas.
+          </p>
+
+          {/* Important Editorial Moment 4 */}
+          <div className="border-l border-blood pl-4 py-1 my-6">
+            <span className="font-display text-lg md:text-xl font-medium italic text-paper tracking-tight">
+              Questions became more interesting than conclusions.
+            </span>
+          </div>
+
+          <p>
+            And when you look closely at systems, you inevitably confront the architecture of control. Who writes the rules? How is compliance maintained? Who benefits, and who pays the price?
+          </p>
+
+          {/* Important Editorial Moment 5 */}
+          <div className="border-l border-blood pl-4 py-1 my-6">
+            <span className="font-display text-lg md:text-xl font-medium italic text-paper tracking-tight">
+              An oligarchy is ultimately about power.
+            </span>
+          </div>
+
+          {/* Centered Distinct Question 3 */}
+          <div className="my-12 py-8 border-y border-paper/5 flex flex-col items-center">
+            <span className="font-sans text-[9px] tracking-widest text-blood uppercase mb-2">Observation</span>
+            <p className="font-display text-xl md:text-2xl text-paper font-normal italic text-center max-w-xl">
+              "Why do societies normalize certain behaviours and condemn others?"
+            </p>
+          </div>
+
+          <p>
+            This power is rarely distributed equally, and it is rarely as simple as a direct conspiracy. It is the natural tendency of complex human organizations to consolidate power into the hands of a few. It is the physics of human organization. To study it requires a dispassionate, analytical mind.
+          </p>
+
+          {/* Important Editorial Moment 6 */}
+          <div className="border-l border-blood pl-4 py-1 my-6">
+            <span className="font-display text-lg md:text-xl font-medium italic text-paper tracking-tight">
+              I founded The Oligarchy at 19 years old.
+            </span>
+          </div>
+
+          <p>
+            At that age, one is often told to wait, to learn, and to accept the existing interpretations of the world. But the hunger to analyze these systems firsthand could not be deferred. The Oligarchy was created as an independent sanctuary for rigorous inquiry, free from institutional bias and the demands of modern sensationalist media.
+          </p>
+
+          <p>
+            The path ahead is long, and there is an infinite amount of terrain left to explore.
+          </p>
+
+          {/* Important Editorial Moments 7 & 8 */}
+          <div className="border-l border-blood pl-4 py-1 my-6 flex flex-col gap-2">
+            <span className="font-display text-lg md:text-xl font-medium italic text-paper tracking-tight block">
+              The publication will evolve.
+            </span>
+            <span className="font-display text-lg md:text-xl font-medium italic text-paper tracking-tight block">
+              Its founder will evolve.
+            </span>
+          </div>
+
+          <p>
+            But the core compass will remain entirely unchanged. We will continue to investigate the quiet incentives, structures, and dynamics that shape our shared world, driven by nothing other than a relentless search for clarity.
+          </p>
+        </div>
+
+        {/* Closing Book Treatment & Philosophical Mission Statement */}
+        <div className="mt-20 pt-16 border-t border-paper/10 flex flex-col items-center text-center">
+          <span className="text-blood text-sm tracking-[0.5em] mb-8 select-none">❖</span>
+          
+          <div className="font-display text-2xl md:text-3xl text-paper italic tracking-wide max-w-xl mx-auto leading-relaxed space-y-6">
+            <p className="text-paper/90">
+              "Why do people become who they become?"
+            </p>
+            <p className="text-paper">
+              The Oligarchy exists in pursuit of that question.
+            </p>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }

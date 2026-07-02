@@ -74,11 +74,9 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
     } catch (err: any) {
       console.error('Sign-in error:', err);
       setMessageType('error');
-      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setMessage('Access denied: Invalid credentials.');
-      } else if (err.code === 'auth/user-not-found') {
-        setMessage('No administrator registered under this email.');
-      } else if (err.code === 'auth/operation-not-allowed' || err.message?.includes('operation-not-allowed')) {
+      const isOpNotAllowed = err.code === 'auth/operation-not-allowed' || err.message?.includes('operation-not-allowed');
+      
+      if (isOpNotAllowed) {
         // Fallback to local admin check if Firebase auth provider is disabled
         if (password === 'n8F?DWVHmy&G!W?0115' && email === 'theoligarchy.ppj@gmail.com') {
           setMessageType('success');
@@ -87,8 +85,12 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
             onLoginSuccess({ email, uid: 'mock-admin-uid' } as any);
           }, 500);
         } else {
-          setMessage('Access denied: Invalid credentials.');
+          setMessage('Firebase Sign-In Error: Email/Password login is not allowed in your Firebase project. To fix this, open your Firebase Console, navigate to "Authentication" -> "Sign-in method", click on "Email/Password" under Native Providers, and toggle "Enable" to on, then click Save.');
         }
+      } else if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setMessage('Access denied: Invalid credentials.');
+      } else if (err.code === 'auth/user-not-found') {
+        setMessage('No administrator registered under this email.');
       } else {
         setMessage(`Authentication failure: ${err.message}`);
       }
@@ -119,9 +121,12 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
           const userCredential = await createUserWithEmailAndPassword(auth, email, password);
           user = userCredential.user;
         } catch (authErr: any) {
-          if (authErr.code === 'auth/operation-not-allowed' || authErr.message?.includes('operation-not-allowed')) {
+          const isOpNotAllowed = authErr.code === 'auth/operation-not-allowed' || authErr.message?.includes('operation-not-allowed');
+          if (isOpNotAllowed) {
             console.warn('Firebase Auth email/password provider is disabled. Falling back to local setup.');
             user = { email, uid: 'mock-admin-uid' };
+            setMessageType('info');
+            setMessage('Notice: Firebase Email/Password Authentication is currently disabled. Active credentials initialized locally, but please enable Email/Password in your Firebase Console (Authentication -> Sign-in method) to secure cloud authentication.');
           } else {
             throw authErr;
           }
@@ -138,12 +143,18 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
 
       setNeedsSetup(false);
       setMessageType('success');
-      setMessage('Administrator credentials initialized successfully.');
+      if (!message) {
+        setMessage('Administrator credentials initialized successfully.');
+      }
       onLoginSuccess(user);
     } catch (err: any) {
       console.error('Setup error:', err);
       setMessageType('error');
-      setMessage(`Initialization failed: ${err.message}`);
+      if (err.code === 'auth/operation-not-allowed' || err.message?.includes('operation-not-allowed')) {
+        setMessage('Firebase Setup Error: Email/Password signup is disabled in your Firebase project. Please open your Firebase Console, navigate to "Authentication" -> "Sign-in method", click on "Email/Password", and toggle "Enable" to on, then click Save.');
+      } else {
+        setMessage(`Initialization failed: ${err.message}`);
+      }
     } finally {
       setLoading(false);
     }
