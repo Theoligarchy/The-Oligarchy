@@ -40,6 +40,30 @@ import {
   FileUp
 } from 'lucide-react';
 
+// Helper to recursively scrub undefined values from object payloads before sending to Firestore
+function cleanUndefined<T>(obj: T): T {
+  if (obj === undefined) return undefined as any;
+  if (obj === null) return null as any;
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => cleanUndefined(item)) as any;
+  }
+
+  if (typeof obj === 'object') {
+    const clean = { ...obj } as any;
+    Object.keys(clean).forEach((key) => {
+      if (clean[key] === undefined) {
+        delete clean[key];
+      } else {
+        clean[key] = cleanUndefined(clean[key]);
+      }
+    });
+    return clean;
+  }
+
+  return obj;
+}
+
 interface AdminDashboardProps {
   onLogout: () => void;
   allArticles: Article[];
@@ -242,31 +266,49 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     }
 
     setIsUploading(true);
+    setUploadProgress('Compressing image locally...');
+
+    let base64Data = '';
+    try {
+      base64Data = await compressImageToBase64(file);
+    } catch (compressErr: any) {
+      console.error('Local compression failed:', compressErr);
+      setAlert({ text: `Local image compression failed: ${compressErr.message}`, type: 'error' });
+      setIsUploading(false);
+      setUploadProgress(null);
+      return;
+    }
+
     setUploadProgress('Uploading to Firebase...');
 
     try {
-      const { ref: sRef, uploadBytes, getDownloadURL } = await import('firebase/storage');
-      const { storage } = await import('../firebase');
-      
-      const fileRef = sRef(storage, `banners/${Date.now()}_${file.name}`);
-      const snapshot = await uploadBytes(fileRef, file);
-      const downloadURL = await getDownloadURL(snapshot.ref);
+      // Attempt Firebase Storage upload with a strict 2-second timeout
+      const storageUploadPromise = (async () => {
+        const { ref: sRef, uploadBytes, getDownloadURL } = await import('firebase/storage');
+        const { storage: fStorage } = await import('../firebase');
+        
+        const fileRef = sRef(fStorage, `banners/${Date.now()}_${file.name}`);
+        const snapshot = await uploadBytes(fileRef, file);
+        return await getDownloadURL(snapshot.ref);
+      })();
+
+      const timeoutPromise = new Promise<string>((_, reject) => 
+        setTimeout(() => reject(new Error('Firebase Storage request timed out (2s)')), 2000)
+      );
+
+      // Race the upload against the 2-second timeout
+      const downloadURL = await Promise.race([storageUploadPromise, timeoutPromise]);
       
       setFeaturedImage(downloadURL);
       setAlert({ text: 'Banner image successfully uploaded to Firebase Storage.', type: 'success' });
     } catch (error: any) {
-      console.warn('Firebase Storage upload failed. Falling back to local Base64 canvas optimization...', error);
-      setUploadProgress('Compressing image...');
-      try {
-        const base64Data = await compressImageToBase64(file);
-        setFeaturedImage(base64Data);
-        setAlert({ 
-          text: 'Banner uploaded and optimized locally (Firebase Storage fallback enabled).', 
-          type: 'success' 
-        });
-      } catch (err: any) {
-        setAlert({ text: `Image compression failed: ${err.message}`, type: 'error' });
-      }
+      console.warn('Firebase Storage upload failed or timed out. Falling back to optimized local Base64...', error);
+      // Fallback is already computed, use it instantly!
+      setFeaturedImage(base64Data);
+      setAlert({ 
+        text: 'Banner uploaded and optimized locally (Firebase Storage fallback triggered).', 
+        type: 'success' 
+      });
     } finally {
       setIsUploading(false);
       setUploadProgress(null);
@@ -567,7 +609,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     };
 
     try {
-      await setDoc(doc(db, 'articles', finalId), articleData);
+      await setDoc(doc(db, 'articles', finalId), cleanUndefined(articleData));
       
       // If marked as featured, toggle all other featured pins off
       if (isFeatured) {
@@ -660,7 +702,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
-      await setDoc(doc(db, 'articles', dupId), duplicated);
+      await setDoc(doc(db, 'articles', dupId), cleanUndefined(duplicated));
       setAlert({ text: 'Article duplicated as Draft.', type: 'success' });
       await refreshArticles();
     } catch (e: any) {
@@ -708,7 +750,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
       addedAt: Date.now()
     };
     try {
-      await setDoc(doc(db, 'reading', id), newBook);
+      await setDoc(doc(db, 'reading', id), cleanUndefined(newBook));
       setAlert({ text: 'Book successfully added to reading shelf.', type: 'success' });
       setNewBookTitle('');
       setNewBookAuthor('');

@@ -5,7 +5,9 @@ import {
   createUserWithEmailAndPassword, 
   sendPasswordResetEmail,
   onAuthStateChanged,
-  User
+  User,
+  GoogleAuthProvider,
+  signInWithPopup
 } from 'firebase/auth';
 import { collection, getDocs, setDoc, doc } from 'firebase/firestore';
 import { KeyRound, Mail, AlertCircle, Info, CheckCircle2 } from 'lucide-react';
@@ -56,6 +58,75 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
 
     return () => unsubscribe();
   }, [onLoginSuccess]);
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setMessage('');
+    
+    try {
+      const provider = new GoogleAuthProvider();
+      // Force account selection screen
+      provider.setCustomParameters({ prompt: 'select_account' });
+      
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      
+      if (!user.email) {
+        throw new Error('Google account is missing an email address.');
+      }
+      
+      const isSystemAdmin = user.email.toLowerCase() === 'theoligarchy.ppj@gmail.com';
+      let isAuthorized = isSystemAdmin;
+      
+      if (!isAuthorized) {
+        try {
+          const metadataCol = collection(db, 'system_meta');
+          const metaSnapshot = await getDocs(metadataCol);
+          if (!metaSnapshot.empty) {
+            metaSnapshot.forEach(docSnap => {
+              const data = docSnap.data();
+              if (data.adminEmail && data.adminEmail.toLowerCase() === user.email?.toLowerCase()) {
+                isAuthorized = true;
+              }
+            });
+          } else {
+            // If website is empty and needs setup, any google user can set up!
+            isAuthorized = true;
+          }
+        } catch (dbErr) {
+          console.error('Error checking custom admin credentials:', dbErr);
+        }
+      }
+      
+      if (isAuthorized) {
+        if (needsSetup) {
+          const metaDoc = doc(db, 'system_meta', 'setup');
+          await setDoc(metaDoc, {
+            adminEmail: user.email,
+            initializedAt: Date.now(),
+            role: 'owner'
+          });
+          setNeedsSetup(false);
+        }
+        
+        setMessageType('success');
+        setMessage(`Authenticated as ${user.email}. Dashboard opening...`);
+        setTimeout(() => {
+          onLoginSuccess(user);
+        }, 800);
+      } else {
+        await auth.signOut();
+        setMessageType('error');
+        setMessage(`Access Denied: ${user.email} is not registered as an editorial administrator.`);
+      }
+    } catch (err: any) {
+      console.error('Google Sign-In failure:', err);
+      setMessageType('error');
+      setMessage(`Google Sign-In failed: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -275,6 +346,39 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
             {loading ? 'Processing...' : needsSetup ? 'Initialize Admin →' : 'Sign In →'}
           </button>
         </form>
+
+        <div className="flex items-center gap-3 my-1">
+          <div className="h-[1px] bg-paper/10 flex-grow" />
+          <span className="font-sans text-[9px] uppercase tracking-wider text-paper/20">OR</span>
+          <div className="h-[1px] bg-paper/10 flex-grow" />
+        </div>
+
+        <button
+          type="button"
+          onClick={handleGoogleSignIn}
+          disabled={loading}
+          className="bg-transparent hover:bg-paper/5 border border-paper/15 disabled:opacity-40 text-paper font-sans text-xs font-bold tracking-widest uppercase py-3.5 flex items-center justify-center gap-2.5 transition-all cursor-pointer rounded-sm"
+        >
+          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+            <path
+              fill="#EA4335"
+              d="M5.266 9.765A7.077 7.077 0 0 1 12 4.909c1.69 0 3.218.6 4.418 1.582L19.91 3C17.782 1.145 15.055 0 12 0 7.353 0 3.393 2.671 1.488 6.56l3.778 3.205z"
+            />
+            <path
+              fill="#34A853"
+              d="M16.04 15.345c-1.077.733-2.436 1.164-4.04 1.164-2.955 0-5.46-2.003-6.355-4.7L1.812 15A11.93 11.93 0 0 0 12 24c3.245 0 6.136-1.095 8.218-2.982l-4.178-5.673z"
+            />
+            <path
+              fill="#4285F4"
+              d="M23.49 12.275c0-.825-.075-1.62-.212-2.39H12v4.51h6.46c-.28 1.48-.115 2.73-.96 3.61l4.178 5.672c2.443-2.254 3.812-5.57 3.812-9.402z"
+            />
+            <path
+              fill="#FBBC05"
+              d="M5.685 11.81a7.03 7.03 0 0 1 0-2.045L1.91 6.56A11.96 11.96 0 0 0 0 12c0 1.92.455 3.733 1.259 5.35l4.426-3.54z"
+            />
+          </svg>
+          {needsSetup ? 'Set up with Google' : 'Sign in with Google'}
+        </button>
 
         <div className="border-t border-paper/10 pt-4 flex gap-2 items-center justify-center text-center font-sans text-[9px] text-paper/20 tracking-wider uppercase">
           <span>Enterprise Encryption Standards</span>
