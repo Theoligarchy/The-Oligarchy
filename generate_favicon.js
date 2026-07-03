@@ -58,11 +58,15 @@ try {
   console.log('Generating standard favicon sizes...');
   execSync('convert public/logo_highres.png -resize 16x16 public/favicon-16x16.png');
   execSync('convert public/logo_highres.png -resize 32x32 public/favicon-32x32.png');
+  execSync('convert public/logo_highres.png -resize 48x48 public/favicon-48x48.png');
+  execSync('convert public/logo_highres.png -resize 96x96 public/favicon-96x96.png');
+  execSync('convert public/logo_highres.png -resize 144x144 public/favicon-144x144.png');
+  execSync('convert public/logo_highres.png -resize 192x192 public/favicon-192x192.png');
   execSync('convert public/logo_highres.png -resize 180x180 public/apple-touch-icon.png');
   
   // Package multiple sizes into a single standard favicon.ico
   console.log('Packaging favicon.ico...');
-  execSync('convert public/favicon-16x16.png public/favicon-32x32.png public/favicon.ico');
+  execSync('convert public/favicon-16x16.png public/favicon-32x32.png public/favicon-48x48.png public/favicon.ico');
   
   // Also save a standard favicon.png
   execSync('cp public/logo_highres.png public/favicon.png');

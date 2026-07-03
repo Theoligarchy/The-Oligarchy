@@ -101,7 +101,17 @@ export default function Header({ activeTab, setActiveTab, onSearch }: HeaderProp
             <button 
               onClick={() => {
                 const mainUrl = 'https://theoligarchy.in';
-                if (navigator.clipboard) {
+                const shareData = {
+                  title: 'The Oligarchy',
+                  text: 'Independent research platform exploring crime, human behaviour, and systems of power.',
+                  url: mainUrl
+                };
+
+                if (navigator.share && navigator.canShare && navigator.canShare(shareData)) {
+                  navigator.share(shareData).catch((err) => {
+                    console.log('Error sharing:', err);
+                  });
+                } else if (navigator.clipboard) {
                   navigator.clipboard.writeText(mainUrl).then(() => {
                     setPlatformCopied(true);
                     setTimeout(() => setPlatformCopied(false), 2000);
@@ -127,7 +137,7 @@ export default function Header({ activeTab, setActiveTab, onSearch }: HeaderProp
                 }
               }}
               className="text-paper/60 hover:text-blood transition-colors p-2 cursor-pointer relative flex items-center justify-center"
-              title="Copy Platform Link to Share"
+              title="Share Platform"
             >
               {platformCopied ? <Check size={18} className="text-green-500 animate-pulse" /> : <Share2 size={18} />}
             </button>
