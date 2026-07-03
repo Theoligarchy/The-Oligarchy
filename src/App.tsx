@@ -52,7 +52,7 @@ export default function App() {
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
   
   // Theme State
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const theme = 'dark';
 
   // Firebase Datastore States
   const [articles, setArticles] = useState<Article[]>([]);
@@ -68,18 +68,12 @@ export default function App() {
   const [articlesPerPage, setArticlesPerPage] = useState<number>(6);
 
   useEffect(() => {
-    // Apply theme selection to HTML element
+    // Apply permanent dark theme selection to HTML element
     const html = document.documentElement;
-    if (theme === 'light') {
-      html.classList.remove('dark');
-      html.style.backgroundColor = '#fff8ee';
-      html.style.color = '#1a1208';
-    } else {
-      html.classList.add('dark');
-      html.style.backgroundColor = '#080808';
-      html.style.color = '#e0e0e0';
-    }
-  }, [theme]);
+    html.classList.add('dark');
+    html.style.backgroundColor = '#080808';
+    html.style.color = '#e0e0e0';
+  }, []);
 
   // Synchronize SEO & Open Graph / Twitter Meta Tags dynamically in browser
   useEffect(() => {
@@ -206,7 +200,21 @@ export default function App() {
 
     // Track active authentication session state
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setAdminUser(user);
+      if (user) {
+        setAdminUser(user);
+      } else {
+        const localSession = localStorage.getItem('local_admin_session');
+        if (localSession) {
+          try {
+            setAdminUser(JSON.parse(localSession));
+          } catch (e) {
+            localStorage.removeItem('local_admin_session');
+            setAdminUser(null);
+          }
+        } else {
+          setAdminUser(null);
+        }
+      }
     });
 
     return () => unsubscribe();
@@ -311,23 +319,17 @@ export default function App() {
   }
 
   return (
-    <div className={`min-h-screen flex flex-col justify-between ${
-      theme === 'light' 
-        ? 'bg-[#fff8ee] text-[#1a1208]' 
-        : 'bg-[#080808] text-[#e0e0e0]'
-    }`}>
+    <div className="min-h-screen flex flex-col justify-between bg-[#080808] text-[#e0e0e0]">
       
       {/* Scroll Progress Indicator Bar */}
       <div className="fixed top-0 left-0 w-full h-[3px] bg-blood z-[999]" id="scroll-bar" />
 
       {/* Decorative Dark Gothic Academic Watermark Rail */}
-      {theme === 'dark' && (
-        <div className="fixed right-0 top-1/2 -translate-y-1/2 hidden xl:flex flex-col gap-12 pr-6 pointer-events-none z-10 select-none">
-          <div className="[writing-mode:vertical-rl] text-[9px] uppercase tracking-[0.55em] text-paper/10 font-extrabold">
-            ANALYTIC • RIGOROUS • HUMAN
-          </div>
+      <div className="fixed right-0 top-1/2 -translate-y-1/2 hidden xl:flex flex-col gap-12 pr-6 pointer-events-none z-10 select-none">
+        <div className="[writing-mode:vertical-rl] text-[9px] uppercase tracking-[0.55em] text-paper/10 font-extrabold">
+          ANALYTIC • RIGOROUS • HUMAN
         </div>
-      )}
+      </div>
 
       {/* Main Gothic Masthead Header */}
       {activeTab !== 'admin' && (
@@ -341,8 +343,6 @@ export default function App() {
             window.history.pushState({ path: newUrl }, '', newUrl);
           }}
           onSearch={handleSearch}
-          theme={theme}
-          setTheme={setTheme}
         />
       )}
 

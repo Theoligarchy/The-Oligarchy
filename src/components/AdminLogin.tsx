@@ -9,12 +9,20 @@ import {
   GoogleAuthProvider,
   signInWithPopup
 } from 'firebase/auth';
-import { collection, getDocs, setDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, setDoc, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { KeyRound, Mail, AlertCircle, Info, CheckCircle2 } from 'lucide-react';
 
 interface AdminLoginProps {
   onLoginSuccess: (user: User) => void;
 }
+
+const hashPassword = async (pwd: string): Promise<string> => {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(pwd);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+};
 
 export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
   const [email, setEmail] = useState('');
@@ -53,6 +61,15 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         onLoginSuccess(user);
+      } else {
+        const localSession = localStorage.getItem('local_admin_session');
+        if (localSession) {
+          try {
+            onLoginSuccess(JSON.parse(localSession));
+          } catch (e) {
+            localStorage.removeItem('local_admin_session');
+          }
+        }
       }
     });
 
@@ -148,15 +165,62 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
       const isOpNotAllowed = err.code === 'auth/operation-not-allowed' || err.message?.includes('operation-not-allowed');
       
       if (isOpNotAllowed) {
-        // Fallback to local admin check if Firebase auth provider is disabled
-        if (password === 'n8F?DWVHmy&G!W?0115' && email === 'theoligarchy.ppj@gmail.com') {
-          setMessageType('success');
-          setMessage('Secure local admin fallback active. Logging in...');
-          setTimeout(() => {
-            onLoginSuccess({ email, uid: 'mock-admin-uid' } as any);
-          }, 500);
-        } else {
+        try {
+          // Check if setup doc exists in Firestore with matching credentials
+          const setupDocRef = doc(db, 'system_meta', 'setup');
+          const setupDocSnap = await getDoc(setupDocRef);
+          
+          if (setupDocSnap.exists()) {
+            const setupData = setupDocSnap.data();
+            const storedEmail = setupData.adminEmail;
+            const storedHash = setupData.hashedPassword;
+            
+            if (email.toLowerCase() === storedEmail.toLowerCase()) {
+              const enteredHash = await hashPassword(password);
+              
+              if (storedHash) {
+                if (enteredHash === storedHash) {
+                  setMessageType('success');
+                  setMessage('Secure local admin fallback active. Logging in...');
+                  localStorage.setItem('local_admin_session', JSON.stringify({ email, uid: 'local-admin-uid' }));
+                  setTimeout(() => {
+                    onLoginSuccess({ email, uid: 'local-admin-uid' } as any);
+                  }, 500);
+                  return;
+                } else {
+                  setMessage('Access denied: Invalid credentials.');
+                  return;
+                }
+              } else {
+                // If setup doc exists but has no hashedPassword yet (from legacy setup),
+                // secure the account with this password hash now
+                await updateDoc(setupDocRef, { hashedPassword: enteredHash });
+                setMessageType('success');
+                setMessage('Administrator account secured and local credentials initialized. Logging in...');
+                localStorage.setItem('local_admin_session', JSON.stringify({ email, uid: 'local-admin-uid' }));
+                setTimeout(() => {
+                  onLoginSuccess({ email, uid: 'local-admin-uid' } as any);
+                }, 500);
+                return;
+              }
+            }
+          }
+          
+          // Emergency direct local admin check if no setup doc or email matches
+          if (password === 'n8F?DWVHmy&G!W?0115' && email === 'theoligarchy.ppj@gmail.com') {
+            setMessageType('success');
+            setMessage('Secure local admin fallback active. Logging in...');
+            localStorage.setItem('local_admin_session', JSON.stringify({ email, uid: 'mock-admin-uid' }));
+            setTimeout(() => {
+              onLoginSuccess({ email, uid: 'mock-admin-uid' } as any);
+            }, 500);
+            return;
+          }
+          
           setMessage('Firebase Sign-In Error: Email/Password login is not allowed in your Firebase project. To fix this, open your Firebase Console, navigate to "Authentication" -> "Sign-in method", click on "Email/Password" under Native Providers, and toggle "Enable" to on, then click Save.');
+        } catch (dbErr: any) {
+          console.error('Error in local credential check fallback:', dbErr);
+          setMessage(`Authentication failure: ${err.message}. Local check failed: ${dbErr.message}`);
         }
       } else if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
         setMessage('Access denied: Invalid credentials.');
@@ -183,6 +247,8 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
 
     try {
       let user: any;
+      const hashedPassword = await hashPassword(password);
+      
       if (email === 'theoligarchy.ppj@gmail.com' && password === 'n8F?DWVHmy&G!W?0115') {
         // Direct local bypass to avoid any Firebase Auth configuration issues
         user = { email, uid: 'mock-admin-uid' };
@@ -195,7 +261,8 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
           const isOpNotAllowed = authErr.code === 'auth/operation-not-allowed' || authErr.message?.includes('operation-not-allowed');
           if (isOpNotAllowed) {
             console.warn('Firebase Auth email/password provider is disabled. Falling back to local setup.');
-            user = { email, uid: 'mock-admin-uid' };
+            user = { email, uid: 'local-admin-uid' };
+            localStorage.setItem('local_admin_session', JSON.stringify({ email, uid: 'local-admin-uid' }));
             setMessageType('info');
             setMessage('Notice: Firebase Email/Password Authentication is currently disabled. Active credentials initialized locally, but please enable Email/Password in your Firebase Console (Authentication -> Sign-in method) to secure cloud authentication.');
           } else {
@@ -204,10 +271,11 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
         }
       }
 
-      // 2. Log setup meta in Firestore to flag setup complete
+      // 2. Log setup meta in Firestore to flag setup complete and save hashed credentials
       const metaDoc = doc(db, 'system_meta', 'setup');
       await setDoc(metaDoc, {
         adminEmail: email,
+        hashedPassword: hashedPassword,
         initializedAt: Date.now(),
         role: 'owner'
       });

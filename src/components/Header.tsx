@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Sun, Moon, Search, Menu, X, Settings, Share2, Check } from 'lucide-react';
+import { Search, Menu, X, Settings, Share2, Check } from 'lucide-react';
 
 interface HeaderProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   onSearch: (query: string) => void;
-  theme: 'dark' | 'light';
-  setTheme: (theme: 'dark' | 'light') => void;
 }
 
-export default function Header({ activeTab, setActiveTab, onSearch, theme, setTheme }: HeaderProps) {
+export default function Header({ activeTab, setActiveTab, onSearch }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [todayDate, setTodayDate] = useState('');
@@ -24,11 +22,6 @@ export default function Header({ activeTab, setActiveTab, onSearch, theme, setTh
     const q = e.target.value;
     setSearchQuery(q);
     onSearch(q);
-  };
-
-  const toggleTheme = () => {
-    const nextTheme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(nextTheme);
   };
 
   const navigateTo = (tab: string) => {
@@ -146,15 +139,6 @@ export default function Header({ activeTab, setActiveTab, onSearch, theme, setTh
               </div>
             )}
           </div>
-
-          {/* Theme switcher integrated into the navigation menu */}
-          <button 
-            onClick={toggleTheme}
-            className="text-paper/60 hover:text-blood transition-colors p-2 cursor-pointer"
-            title={theme === 'dark' ? "Switch to Light Academic Theme" : "Switch to Dark Gothic Theme"}
-          >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
 
           {/* Inline Search Bar */}
           <div className="relative flex items-center bg-paper/5 border border-paper/12 rounded-sm px-2.5 py-1">

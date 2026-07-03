@@ -807,6 +807,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
   const handleSignOutAction = async () => {
     try {
+      localStorage.removeItem('local_admin_session');
       await signOut(auth);
       onLogout();
     } catch (e) {
