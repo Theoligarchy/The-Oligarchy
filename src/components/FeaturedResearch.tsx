@@ -1,6 +1,7 @@
 import React from 'react';
 import { Article } from '../types';
 import { Eye, Clock, Download, FileText, ArrowRight } from 'lucide-react';
+import ShareMenu from './ShareMenu';
 
 interface FeaturedResearchProps {
   article: Article;
@@ -57,7 +58,7 @@ export default function FeaturedResearch({ article, onClick }: FeaturedResearchP
         </p>
 
         {/* Action Triggers: PDF Download and Standard View */}
-        <div className="flex flex-wrap gap-4 mt-2">
+        <div className="flex flex-wrap items-center gap-4 mt-2">
           {/* Main read article trigger */}
           <button 
             onClick={(e) => {
@@ -82,6 +83,11 @@ export default function FeaturedResearch({ article, onClick }: FeaturedResearchP
               <FileText size={12} /> Research Report (PDF) <Download size={12} />
             </a>
           )}
+
+          {/* Direct Card-level Share Widget */}
+          <div onClick={(e) => e.stopPropagation()} className="relative z-30">
+            <ShareMenu article={article} />
+          </div>
         </div>
 
         {/* Banner footer views and timing */}

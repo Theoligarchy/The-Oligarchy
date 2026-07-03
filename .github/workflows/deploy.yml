@@ -44,6 +44,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Ensure CNAME is present for Custom Domain
+        run: |
+          echo "theoligarchy.in" > ./dist/CNAME
+          echo "theoligarchy.in" > ./CNAME
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 

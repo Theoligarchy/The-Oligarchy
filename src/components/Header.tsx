@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sun, Moon, Search, Menu, X, Settings } from 'lucide-react';
+import { Sun, Moon, Search, Menu, X, Settings, Share2, Check } from 'lucide-react';
 
 interface HeaderProps {
   activeTab: string;
@@ -13,6 +13,7 @@ export default function Header({ activeTab, setActiveTab, onSearch, theme, setTh
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [todayDate, setTodayDate] = useState('');
+  const [platformCopied, setPlatformCopied] = useState(false);
 
   useEffect(() => {
     const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', year: 'numeric' };
@@ -47,13 +48,6 @@ export default function Header({ activeTab, setActiveTab, onSearch, theme, setTh
 
       {/* Main Gothic Masthead Logo */}
       <div className="text-center py-6 md:py-8 flex flex-col items-center justify-center gap-3">
-        <img 
-          src="/logo_highres.png" 
-          alt="The Oligarchy Logo" 
-          onClick={() => navigateTo('home')}
-          className="w-14 h-14 md:w-18 md:h-18 object-contain cursor-pointer transition-all duration-300 hover:scale-105 border border-paper/10 p-1.5 bg-black/40 rounded-sm selection:bg-transparent"
-          referrerPolicy="no-referrer"
-        />
         <h1 
           onClick={() => navigateTo('home')} 
           className="font-gothic text-5xl md:text-8xl text-paper hover:text-blood transition-colors duration-300 cursor-pointer selection:bg-blood selection:text-paper leading-none"
@@ -109,6 +103,50 @@ export default function Header({ activeTab, setActiveTab, onSearch, theme, setTh
 
         {/* Right side controls: Search and Theme */}
         <div className="flex items-center gap-4 py-2">
+          {/* Share Platform Button */}
+          <div className="relative">
+            <button 
+              onClick={() => {
+                const mainUrl = 'https://theoligarchy.in';
+                if (navigator.clipboard) {
+                  navigator.clipboard.writeText(mainUrl).then(() => {
+                    setPlatformCopied(true);
+                    setTimeout(() => setPlatformCopied(false), 2000);
+                  }).catch(() => {
+                    const tempInput = document.createElement('input');
+                    tempInput.value = mainUrl;
+                    document.body.appendChild(tempInput);
+                    tempInput.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(tempInput);
+                    setPlatformCopied(true);
+                    setTimeout(() => setPlatformCopied(false), 2000);
+                  });
+                } else {
+                  const tempInput = document.createElement('input');
+                  tempInput.value = mainUrl;
+                  document.body.appendChild(tempInput);
+                  tempInput.select();
+                  document.execCommand('copy');
+                  document.body.removeChild(tempInput);
+                  setPlatformCopied(true);
+                  setTimeout(() => setPlatformCopied(false), 2000);
+                }
+              }}
+              className="text-paper/60 hover:text-blood transition-colors p-2 cursor-pointer relative flex items-center justify-center"
+              title="Copy Platform Link to Share"
+            >
+              {platformCopied ? <Check size={18} className="text-green-500 animate-pulse" /> : <Share2 size={18} />}
+            </button>
+            
+            {/* Elegant Tooltip Popover */}
+            {platformCopied && (
+              <div className="absolute right-0 top-10 bg-blood text-paper font-sans text-[9px] font-bold tracking-wider uppercase py-1 px-2.5 rounded-sm shadow-md whitespace-nowrap z-[100] border border-paper/10 animate-fade-in">
+                Platform Link Copied!
+              </div>
+            )}
+          </div>
+
           {/* Theme switcher integrated into the navigation menu */}
           <button 
             onClick={toggleTheme}

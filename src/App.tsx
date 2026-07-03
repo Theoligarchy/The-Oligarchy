@@ -81,6 +81,75 @@ export default function App() {
     }
   }, [theme]);
 
+  // Synchronize SEO & Open Graph / Twitter Meta Tags dynamically in browser
+  useEffect(() => {
+    let title = "The Oligarchy — Independent Research Publication";
+    let desc = "Independent research platform exploring crime, human behaviour, and systems of power.";
+    let image = "https://theoligarchy.in/logo_highres.png";
+    let url = "https://theoligarchy.in";
+
+    if (activeTab === 'article-view' && selectedArticle) {
+      title = selectedArticle.seoTitle || `${selectedArticle.title} — The Oligarchy`;
+      desc = selectedArticle.seoDescription || selectedArticle.excerpt || desc;
+      image = selectedArticle.featuredImage || image;
+      url = selectedArticle.canonicalUrl || `https://theoligarchy.in/?article=${selectedArticle.id}`;
+    } else if (activeTab === 'about') {
+      title = "About Us — The Oligarchy";
+      desc = "Learn about our mission, editorial policy, and investigative methodologies.";
+    } else if (activeTab === 'editorial') {
+      title = "Editorial Principles — The Oligarchy";
+      desc = "Our strict journalistic values, verification protocols, and ethical principles.";
+    } else if (activeTab === 'contact') {
+      title = "Submit a Tip — The Oligarchy";
+      desc = "Submit highly classified tips, leaks, or research material to our investigators.";
+    }
+
+    // Update document title
+    document.title = title;
+
+    // Helper function to update meta attributes safely
+    const updateMeta = (selector: string, attr: string, value: string) => {
+      let element = document.querySelector(selector);
+      if (!element) {
+        // Parse the selector and create the element if it doesn't exist
+        if (selector.startsWith('meta[name=')) {
+          const name = selector.match(/name="([^"]+)"/)?.[1];
+          if (name) {
+            element = document.createElement('meta');
+            element.setAttribute('name', name);
+            document.head.appendChild(element);
+          }
+        } else if (selector.startsWith('meta[property=')) {
+          const prop = selector.match(/property="([^"]+)"/)?.[1];
+          if (prop) {
+            element = document.createElement('meta');
+            element.setAttribute('property', prop);
+            document.head.appendChild(element);
+          }
+        }
+      }
+      if (element) {
+        element.setAttribute(attr, value);
+      }
+    };
+
+    // Standard description
+    updateMeta('meta[name="description"]', 'content', desc);
+
+    // Open Graph meta tags
+    updateMeta('meta[property="og:title"]', 'content', title);
+    updateMeta('meta[property="og:description"]', 'content', desc);
+    updateMeta('meta[property="og:image"]', 'content', image);
+    updateMeta('meta[property="og:url"]', 'content', url);
+
+    // Twitter meta tags
+    updateMeta('meta[name="twitter:title"]', 'content', title);
+    updateMeta('meta[name="twitter:description"]', 'content', desc);
+    updateMeta('meta[name="twitter:image"]', 'content', image);
+    updateMeta('meta[name="twitter:url"]', 'content', url);
+
+  }, [activeTab, selectedArticle]);
+
   const loadData = async () => {
     setLoading(true);
     try {

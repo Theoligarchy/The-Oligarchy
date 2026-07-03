@@ -1,6 +1,7 @@
 import React from 'react';
 import { Article } from '../types';
 import { Eye, Clock, Calendar } from 'lucide-react';
+import ShareMenu from './ShareMenu';
 
 interface ArticleCardProps {
   key?: string;
@@ -64,6 +65,11 @@ export default function ArticleCard({ article, onClick }: ArticleCardProps) {
           <span className="hidden sm:inline">
             {(article.tags || []).slice(0, 2).join(', ')}
           </span>
+        </div>
+
+        {/* Direct Card-level Share Widget */}
+        <div onClick={(e) => e.stopPropagation()} className="relative z-30">
+          <ShareMenu article={article} />
         </div>
 
         {/* Action / Read Time */}
