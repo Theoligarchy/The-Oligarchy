@@ -26,6 +26,7 @@ import ContactSection from './components/ContactSection';
 import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import CanvaEmbed from './components/CanvaEmbed';
+import ShareMenu from './components/ShareMenu';
 
 import { 
   BookOpen, 
@@ -113,6 +114,17 @@ export default function App() {
       
       setReadingItems(readingList.sort((a,b) => b.addedAt - a.addedAt));
 
+      // Direct Deep-Linking URL query parameter support on initial load
+      const params = new URLSearchParams(window.location.search);
+      const urlArticleId = params.get('article');
+      if (urlArticleId) {
+        const sharedArticle = sortedArticles.find(a => a.id === urlArticleId);
+        if (sharedArticle) {
+          setSelectedArticle(sharedArticle);
+          setActiveTab('article-view');
+        }
+      }
+
     } catch (e) {
       console.error("Error loading application data:", e);
     } finally {
@@ -136,6 +148,10 @@ export default function App() {
     setSelectedArticle(art);
     setActiveTab('article-view');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    // Synchronize URL with active article for direct deep-linking support
+    const newUrl = `${window.location.origin}${window.location.pathname}?article=${art.id}`;
+    window.history.pushState({ path: newUrl }, '', newUrl);
 
     try {
       const artRef = doc(db, 'articles', art.id);
@@ -251,6 +267,9 @@ export default function App() {
           setActiveTab={(tab) => {
             setSelectedArticle(null);
             setActiveTab(tab);
+            // Clear parameter on any tab change
+            const newUrl = `${window.location.origin}${window.location.pathname}`;
+            window.history.pushState({ path: newUrl }, '', newUrl);
           }}
           onSearch={handleSearch}
           theme={theme}
@@ -579,6 +598,9 @@ export default function App() {
               onClick={() => {
                 setSelectedArticle(null);
                 setActiveTab('home');
+                // Clear parameter on return
+                const newUrl = `${window.location.origin}${window.location.pathname}`;
+                window.history.pushState({ path: newUrl }, '', newUrl);
               }}
               className="font-sans text-[9px] font-bold tracking-widest uppercase border border-paper/10 text-paper/45 hover:border-blood hover:text-paper py-2 px-5 mb-10 inline-flex items-center gap-1.5 cursor-pointer rounded-sm"
             >
@@ -630,20 +652,29 @@ export default function App() {
                 <span className="font-sans text-[10px] text-paper/30 flex items-center gap-1"><Clock size={12} /> {selectedArticle.readTime || '5 min read'}</span>
               </div>
 
-              {/* Action Report download button if present */}
-              {selectedArticle.pdfLink && (
-                <div className="flex justify-end -mb-4">
-                  <a 
-                    href={selectedArticle.pdfLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="bg-blood/15 border border-blood/40 hover:bg-blood/25 text-paper/80 hover:text-paper font-sans text-[9px] font-bold tracking-widest uppercase py-2.5 px-4 rounded-sm flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer"
-                    title="Download fully cited PDF report file"
-                  >
-                    <FileText size={10} /> Reference Report PDF <Download size={10} />
-                  </a>
+              {/* Action Row: Reference Report PDF & Sharing Menu */}
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-paper/10 pb-4 mt-2">
+                <div>
+                  {selectedArticle.pdfLink ? (
+                    <a 
+                      href={selectedArticle.pdfLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-blood/15 border border-blood/40 hover:bg-blood/25 text-paper/80 hover:text-paper font-sans text-[9px] font-bold tracking-widest uppercase py-2.5 px-4 rounded-sm flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Download fully cited PDF report file"
+                    >
+                      <FileText size={10} /> Reference Report PDF <Download size={10} />
+                    </a>
+                  ) : (
+                    <div className="font-mono text-[9px] text-paper/30 uppercase tracking-widest">
+                      Verified Research Analysis
+                    </div>
+                  )}
                 </div>
-              )}
+
+                {/* Custom sharing widget with beautiful dropdown & Instagram guide */}
+                <ShareMenu article={selectedArticle} />
+              </div>
 
               {/* Big Display Headings */}
               <h1 className="font-display text-3xl md:text-5xl font-extrabold text-paper leading-tight tracking-tight mt-2">
