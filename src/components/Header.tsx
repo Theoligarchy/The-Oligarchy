@@ -46,10 +46,17 @@ export default function Header({ activeTab, setActiveTab, onSearch, theme, setTh
       </div>
 
       {/* Main Gothic Masthead Logo */}
-      <div className="text-center py-6 md:py-8">
+      <div className="text-center py-6 md:py-8 flex flex-col items-center justify-center gap-3">
+        <img 
+          src="/logo_highres.png" 
+          alt="The Oligarchy Logo" 
+          onClick={() => navigateTo('home')}
+          className="w-14 h-14 md:w-18 md:h-18 object-contain cursor-pointer transition-all duration-300 hover:scale-105 border border-paper/10 p-1.5 bg-black/40 rounded-sm selection:bg-transparent"
+          referrerPolicy="no-referrer"
+        />
         <h1 
           onClick={() => navigateTo('home')} 
-          className="font-gothic text-5xl md:text-8xl text-paper hover:text-blood transition-colors duration-300 cursor-pointer selection:bg-blood selection:text-paper"
+          className="font-gothic text-5xl md:text-8xl text-paper hover:text-blood transition-colors duration-300 cursor-pointer selection:bg-blood selection:text-paper leading-none"
         >
           The Oligarchy
         </h1>
