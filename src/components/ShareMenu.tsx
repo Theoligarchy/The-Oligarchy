@@ -27,8 +27,23 @@ export default function ShareMenu({ article }: ShareMenuProps) {
   
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Generate share URL with direct article link parameter
-  const shareUrl = `${window.location.origin}${window.location.pathname}?article=${article.id}`;
+  // Generate share URL with direct article link parameter or pretty slug path
+  const baseOrigin = (
+    window.location.origin.includes('run.app') || 
+    window.location.origin.includes('localhost') || 
+    window.location.origin.includes('127.0.0.1')
+  ) ? 'https://theoligarchy.in' : window.location.origin;
+
+  const slugify = (text: string) => {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  };
+
+  const shareUrl = article.slug
+    ? `${baseOrigin}/post/${slugify(article.slug)}`
+    : `${baseOrigin}/post/${article.id}`;
   const shareTitle = `The Oligarchy — ${article.title}`;
   const shareText = `Read this independent research analysis on ${article.title} at The Oligarchy:`;
 

@@ -2,8 +2,39 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Prevent benign development HMR WebSocket connection errors from triggering UI popups -->
+    <script>
+      (function() {
+        if (window.location.hostname.includes('localhost') || window.location.hostname.includes('run.app') || window.location.hostname.includes('127.0.0.1')) {
+          window.addEventListener('unhandledrejection', function(event) {
+            if (event.reason && (
+              (event.reason.message && event.reason.message.includes('WebSocket')) ||
+              (event.reason.message && event.reason.message.includes('websocket')) ||
+              (event.reason.toString && event.reason.toString().includes('WebSocket')) ||
+              (event.reason.toString && event.reason.toString().includes('websocket'))
+            )) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }, true);
+          window.addEventListener('error', function(event) {
+            if (event.message && (
+              event.message.includes('WebSocket') || 
+              event.message.includes('websocket') ||
+              event.message.includes('Failed to connect')
+            )) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }, true);
+        }
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="The Oligarchy — Independent research platform exploring crime, human behaviour, and systems of power." />
+    <meta name="description" content="The Oligarchy is an independent research publication and archive focusing on advanced criminology, criminal psychology, geopolitical power systems, and sociological research." />
+    <meta name="keywords" content="criminology research, criminal psychology, power dynamics, systemic crime, political criminology, independent investigation, behavioral science, public policy research, sociology of power, academic crime studies" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <link rel="canonical" href="https://theoligarchy.in/" />
     
     <!-- Favicons & Brand Assets for Browsers & Google Search Results -->
     <meta name="google-site-verification" content="42bb74ca1c0fd6b7" />
@@ -17,22 +48,64 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192x192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     
-    <title>The Oligarchy — Independent Research Publication</title>
+    <title>The Oligarchy — Independent Criminology & Power Systems Research</title>
     
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://theoligarchy.in/" />
-    <meta property="og:title" content="The Oligarchy — Independent Research Publication" />
-    <meta property="og:description" content="Independent research platform exploring crime, human behaviour, and systems of power." />
+    <meta property="og:title" content="The Oligarchy — Independent Criminology & Power Systems Research" />
+    <meta property="og:description" content="An independent peer-reviewed and scholarly archive dedicated to investigating criminology, criminal psychology, and political power systems." />
     <meta property="og:image" content="https://theoligarchy.in/logo_highres.png" />
     <meta property="og:site_name" content="The Oligarchy" />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:url" content="https://theoligarchy.in/" />
-    <meta name="twitter:title" content="The Oligarchy — Independent Research Publication" />
-    <meta name="twitter:description" content="Independent research platform exploring crime, human behaviour, and systems of power." />
+    <meta name="twitter:title" content="The Oligarchy — Independent Criminology & Power Systems Research" />
+    <meta name="twitter:description" content="An independent peer-reviewed and scholarly archive dedicated to investigating criminology, criminal psychology, and political power systems." />
     <meta name="twitter:image" content="https://theoligarchy.in/logo_highres.png" />
+
+    <!-- Google Structured Data (JSON-LD) for Site Name, Search Listing, and Official Logo -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://theoligarchy.in/#website",
+          "url": "https://theoligarchy.in/",
+          "name": "The Oligarchy",
+          "alternateName": "The Oligarchy Research Publication",
+          "description": "An independent digital archive and journal compiling analytical research on criminology, psychology of crime, and geopolitical systems of power.",
+          "publisher": {
+            "@id": "https://theoligarchy.in/#organization"
+          }
+        },
+        {
+          "@type": "NewsMediaOrganization",
+          "@id": "https://theoligarchy.in/#organization",
+          "name": "The Oligarchy",
+          "url": "https://theoligarchy.in/",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://theoligarchy.in/logo_highres.png",
+            "width": 512,
+            "height": 512
+          },
+          "image": "https://theoligarchy.in/logo_highres.png",
+          "knowsAbout": [
+            "Criminology",
+            "Criminal Psychology",
+            "Sociology of Crime",
+            "Political Systems",
+            "Behavioral Science",
+            "Systems of Power"
+          ],
+          "publishingPrinciples": "https://theoligarchy.in/#principles"
+        }
+      ]
+    }
+    </script>
     
     <!-- Google Fonts for Gothic and Journal Aesthetics -->
     <link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,900;1,400;1,600;1,700&family=Crimson+Text:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />

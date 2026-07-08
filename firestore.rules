@@ -11,8 +11,10 @@ service cloud.firestore {
     match /articles/{articleId} {
       // Allow public readers to read published articles
       allow read: if resource == null || resource.data.status == 'published' || isAdmin();
-      // Only authenticated admins can write or delete
-      allow write, delete: if isAdmin();
+      // Allow anyone to update only the views field (for analytics), but only admins can do other updates
+      allow update: if (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views'])) || isAdmin();
+      // Only authenticated admins can create or delete articles
+      allow create, delete: if isAdmin();
     }
 
     // Reading Stack Rules
@@ -25,6 +27,19 @@ service cloud.firestore {
     match /subscribers/{subscriberId} {
       allow create: if true; // Public can subscribe
       allow read, update, delete: if isAdmin();
+    }
+
+    // Analytics Views Logs
+    match /views_log/{viewId} {
+      allow create: if true; // Public can log views
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Peer Reviews / Marginalia / Debate Portal
+    match /peer_reviews/{reviewId} {
+      allow read, create: if true; // Public can read and submit peer annotations
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['likes', 'replies']) || isAdmin(); // Public can upvote or reply
+      allow delete: if isAdmin();
     }
 
     // Research Tips

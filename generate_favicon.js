@@ -1,5 +1,6 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
+import path from 'path';
 
 try {
   console.log('Generating high-resolution "The Oligarchy" logo...');
@@ -12,7 +13,7 @@ try {
   // Define ImageMagick drawing elements
   const width = 512;
   const height = 512;
-  const fontPath = 'UnifrakturMaguntia.ttf';
+  const fontPath = path.resolve('UnifrakturMaguntia.ttf');
 
   // We build a single powerful ImageMagick command to render the complete logo.
   // It has:

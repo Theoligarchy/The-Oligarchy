@@ -8,7 +8,8 @@ import {
   updateDoc, 
   query, 
   orderBy, 
-  addDoc 
+  addDoc,
+  increment
 } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { Article, ReadingItem } from './types';
@@ -42,8 +43,30 @@ import {
   ArrowLeft,
   Search,
   CheckCircle2,
-  Calendar
+  Calendar,
+  Award,
+  MessageSquare
 } from 'lucide-react';
+
+import MarginaliaPanel from './components/MarginaliaPanel';
+import { compileScholarlyPDF } from './utils/pdfCompiler';
+
+// Log view entries to firestore views_log
+const logViewEntry = async (art: Article) => {
+  try {
+    const viewsLogRef = collection(db, 'views_log');
+    await addDoc(viewsLogRef, {
+      articleId: art.id,
+      articleTitle: art.title,
+      category: art.category || 'politics',
+      timestamp: Date.now(),
+      userAgent: navigator.userAgent,
+      referrer: document.referrer || 'direct'
+    });
+  } catch (e) {
+    console.error("Failed to write views log:", e);
+  }
+};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('home');
@@ -66,6 +89,11 @@ export default function App() {
 
   // Pagination count
   const [articlesPerPage, setArticlesPerPage] = useState<number>(6);
+
+  // Marginalia / Peer-Review State
+  const [isMarginaliaOpen, setIsMarginaliaOpen] = useState(false);
+  const [annotationParagraphIndex, setAnnotationParagraphIndex] = useState<number>(-1);
+  const [annotationParagraphText, setAnnotationParagraphText] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     // Apply permanent dark theme selection to HTML element
@@ -177,14 +205,59 @@ export default function App() {
       
       setReadingItems(readingList.sort((a,b) => b.addedAt - a.addedAt));
 
-      // Direct Deep-Linking URL query parameter support on initial load
+      // Direct Deep-Linking URL query parameter or path-based support on initial load
       const params = new URLSearchParams(window.location.search);
-      const urlArticleId = params.get('article');
+      let urlArticleId = params.get('article') || params.get('art');
+      
+      if (!urlArticleId) {
+        // Try to parse path-based deep-linking: /post/:slug or /article/:id
+        const pathname = window.location.pathname;
+        const postMatch = pathname.match(/^\/post\/([^\/?#]+)/);
+        const articleMatch = pathname.match(/^\/article\/([^\/?#]+)/);
+        if (postMatch) {
+          urlArticleId = postMatch[1];
+        } else if (articleMatch) {
+          urlArticleId = articleMatch[1];
+        }
+      }
+
       if (urlArticleId) {
-        const sharedArticle = sortedArticles.find(a => a.id === urlArticleId);
+        let decodedId = urlArticleId;
+        try {
+          decodedId = decodeURIComponent(urlArticleId).trim();
+        } catch (e) {
+          // ignore
+        }
+
+        // Find article matching by id, slug, or slugified title (with robust fallback for spaces vs hyphens)
+        const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').trim();
+        const normalizedTarget = normalize(decodedId);
+
+        const sharedArticle = sortedArticles.find(a => 
+          a.id === decodedId || 
+          a.id === urlArticleId ||
+          (a.slug && a.slug.trim() === decodedId) ||
+          (a.slug && normalize(a.slug) === normalizedTarget) ||
+          (a.title && normalize(a.title) === normalizedTarget)
+        );
+        
         if (sharedArticle) {
           setSelectedArticle(sharedArticle);
           setActiveTab('article-view');
+          
+          // Increment views for deep-linked loading
+          try {
+            const artRef = doc(db, 'articles', sharedArticle.id);
+            await updateDoc(artRef, {
+              views: increment(1)
+            });
+            // Update the views count in the sorted list so it displays correctly on load
+            sharedArticle.views = (sharedArticle.views || 0) + 1;
+            // Log analytics view event
+            logViewEntry(sharedArticle);
+          } catch (e) {
+            console.error("Failed to increment views on deep-link load:", e);
+          }
         }
       }
 
@@ -226,17 +299,26 @@ export default function App() {
     setActiveTab('article-view');
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
-    // Synchronize URL with active article for direct deep-linking support
-    const newUrl = `${window.location.origin}${window.location.pathname}?article=${art.id}`;
+    // Synchronize URL with active article for direct deep-linking support using pretty paths
+    const slugify = (text: string) => {
+      return text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    };
+    const urlSlug = art.slug ? slugify(art.slug) : art.id;
+    const newUrl = `${window.location.origin}/post/${urlSlug}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
 
     try {
       const artRef = doc(db, 'articles', art.id);
       await updateDoc(artRef, {
-        views: (art.views || 0) + 1
+        views: increment(1)
       });
       // Update local state views counter immediately
       setArticles(prev => prev.map(a => a.id === art.id ? { ...a, views: (a.views || 0) + 1 } : a));
+      // Log analytics view event
+      logViewEntry(art);
     } catch (e) {
       console.error("Failed to increment views:", e);
     }
@@ -265,6 +347,69 @@ export default function App() {
     }
   };
 
+  // Helper to parse HTML content into interactive paragraphs and section nodes
+  const renderInteractiveContent = (contentHtml: string) => {
+    if (!contentHtml) return null;
+
+    // Split HTML by </p>, keeping paragraphs intact
+    const rawParagraphs = contentHtml.split('</p>');
+    const paragraphs = rawParagraphs
+      .map(p => {
+        const trimmed = p.trim();
+        if (!trimmed) return null;
+        if (trimmed.startsWith('<p>')) {
+          return trimmed + '</p>';
+        } else {
+          return '<p>' + trimmed + '</p>';
+        }
+      })
+      .filter(Boolean) as string[];
+
+    return (
+      <div className="flex flex-col gap-6 relative select-text selection:bg-blood selection:text-paper">
+        {paragraphs.map((p, idx) => {
+          // Check if this paragraph contains heading tags
+          const isHeading = p.includes('<h1') || p.includes('<h2') || p.includes('<h3') || p.includes('<h4');
+          const plainText = p.replace(/<[^>]*>/g, '').trim();
+
+          // Skip if empty paragraph
+          if (!plainText) return null;
+          
+          return (
+            <div 
+              key={idx} 
+              className={`group relative flex flex-col md:flex-row gap-4 items-start ${
+                isHeading ? 'mt-4' : ''
+              }`}
+            >
+              {/* Paragraph Content */}
+              <div 
+                className="flex-1 font-serif text-base md:text-lg leading-relaxed text-paper/70 hover:text-paper transition-colors duration-200"
+                dangerouslySetInnerHTML={{ __html: p }}
+              />
+              
+              {/* Side Trigger Button */}
+              <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center md:absolute md:-right-10 md:top-1/2 md:-translate-y-1/2 z-10 shrink-0 mt-2 md:mt-0">
+                <button
+                  onClick={() => {
+                    setAnnotationParagraphIndex(idx);
+                    setAnnotationParagraphText(plainText);
+                    setIsMarginaliaOpen(true);
+                  }}
+                  className="p-1.5 rounded bg-[#0c0c0c] hover:bg-blood/20 border border-paper/10 text-paper/40 hover:text-blood transition-all cursor-pointer shadow-md flex items-center gap-1 font-sans text-[8px] uppercase tracking-wider px-2"
+                  title="Discuss & review this section"
+                >
+                  <MessageSquare size={10} />
+                  <span>Discuss</span>
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   // Filter calculations using Fuse.js for high-performance fuzzy searching
   const filteredArticles = useMemo(() => {
     // 1. Get base articles (skip drafts for public view)
@@ -288,9 +433,10 @@ export default function App() {
           { name: 'title', weight: 0.5 },
           { name: 'subtitle', weight: 0.3 },
           { name: 'excerpt', weight: 0.2 },
-          { name: 'tags', weight: 0.3 }
+          { name: 'tags', weight: 0.3 },
+          { name: 'content', weight: 0.15 }
         ],
-        threshold: 0.45,
+        threshold: 0.5,
         ignoreLocation: true
       });
       return fuse.search(searchQuery).map(result => result.item);
@@ -298,6 +444,60 @@ export default function App() {
 
     return list;
   }, [articles, categoryFilter, searchQuery]);
+
+  // Extract all unique tags across published articles to enable cross-document tracing
+  const allUniqueTags = useMemo(() => {
+    const tagsSet = new Set<string>();
+    articles.forEach(art => {
+      if (art.status === 'published' && art.tags) {
+        art.tags.forEach(tag => {
+          if (tag && tag.trim()) {
+            tagsSet.add(tag.trim());
+          }
+        });
+      }
+    });
+    return Array.from(tagsSet).slice(0, 15); // Top 15 tags
+  }, [articles]);
+
+  // Calculate Related Investigations dynamically to encourage circular reading
+  const relatedInvestigations = useMemo(() => {
+    if (!selectedArticle) return [];
+    
+    const currentTags = (selectedArticle.tags || []).map(t => t.toLowerCase().trim());
+    
+    return articles
+      .filter(art => art.status === 'published' && art.id !== selectedArticle.id)
+      .map(art => {
+        let score = 0;
+        const artTags = (art.tags || []).map(t => t.toLowerCase().trim());
+        
+        // 1. Same category
+        if (art.category === selectedArticle.category) {
+          score += 3;
+        }
+        
+        // 2. Shared tags
+        const sharedTags = (art.tags || []).filter(tag => 
+          currentTags.includes(tag.toLowerCase().trim())
+        );
+        score += sharedTags.length * 2;
+        
+        // 3. Shared series
+        if (selectedArticle.seriesName && art.seriesName && selectedArticle.seriesName === art.seriesName) {
+          score += 4;
+        }
+        
+        return { 
+          article: art, 
+          score, 
+          sharedTags 
+        };
+      })
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+  }, [selectedArticle, articles]);
 
   const featuredPost = articles.find(art => art.isFeatured && art.status === 'published');
 
@@ -339,7 +539,7 @@ export default function App() {
             setSelectedArticle(null);
             setActiveTab(tab);
             // Clear parameter on any tab change
-            const newUrl = `${window.location.origin}${window.location.pathname}`;
+            const newUrl = window.location.origin;
             window.history.pushState({ path: newUrl }, '', newUrl);
           }}
           onSearch={handleSearch}
@@ -489,6 +689,74 @@ export default function App() {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* ══ DYNAMIC UNIFIED DEEP SEARCH & ANALYTICAL THEME TRACKER ══ */}
+                <div className="bg-navy/20 border border-paper/10 p-5 rounded-sm flex flex-col gap-4">
+                  <div className="relative flex items-center bg-[#050505] border border-paper/10 focus-within:border-blood/50 rounded-sm px-3.5 py-2.5 transition-all">
+                    <Search size={16} className="text-paper/30 mr-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Query deep archives, key concepts, tags, or full texts..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="bg-transparent text-paper font-serif text-sm focus:outline-none w-full placeholder-paper/20"
+                    />
+                    {searchQuery && (
+                      <button 
+                        onClick={() => setSearchQuery('')}
+                        className="text-paper/40 hover:text-blood text-[10px] font-sans uppercase tracking-widest font-bold ml-2 cursor-pointer transition-colors"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Real-time search status metadata */}
+                  {searchQuery.trim() && (
+                    <div className="flex justify-between items-center bg-blood/5 border border-blood/20 py-2 px-3 rounded-sm">
+                      <span className="font-sans text-[10px] uppercase tracking-wider text-blood font-bold">
+                        Deep Query active
+                      </span>
+                      <span className="font-mono text-[10px] text-paper/50">
+                        Found {filteredArticles.length} matching analytical documents
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Cross-Document Theme Tracing Tags Cloud */}
+                  {allUniqueTags.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <span className="font-sans text-[9px] font-bold uppercase tracking-widest text-paper/30">
+                        Trace Overlapping Themes across Documents:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {allUniqueTags.map((tag) => {
+                          const isActive = searchQuery.toLowerCase().trim() === tag.toLowerCase().trim();
+                          return (
+                            <button
+                              key={tag}
+                              onClick={() => {
+                                // Toggle tag selection
+                                if (isActive) {
+                                  setSearchQuery('');
+                                } else {
+                                  setSearchQuery(tag);
+                                }
+                              }}
+                              className={`font-sans text-[9px] tracking-wider uppercase px-2.5 py-1 border rounded-sm cursor-pointer transition-all ${
+                                isActive 
+                                  ? 'bg-blood border-blood text-paper font-bold shadow' 
+                                  : 'border-paper/10 bg-paper/5 text-paper/40 hover:border-blood/40 hover:text-paper hover:bg-paper/10'
+                              }`}
+                            >
+                              #{tag}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* List Grid */}
@@ -668,7 +936,7 @@ export default function App() {
                 setSelectedArticle(null);
                 setActiveTab('home');
                 // Clear parameter on return
-                const newUrl = `${window.location.origin}${window.location.pathname}`;
+                const newUrl = window.location.origin;
                 window.history.pushState({ path: newUrl }, '', newUrl);
               }}
               className="font-sans text-[9px] font-bold tracking-widest uppercase border border-paper/10 text-paper/45 hover:border-blood hover:text-paper py-2 px-5 mb-10 inline-flex items-center gap-1.5 cursor-pointer rounded-sm"
@@ -723,22 +991,25 @@ export default function App() {
 
               {/* Action Row: Reference Report PDF & Sharing Menu */}
               <div className="flex flex-wrap items-center justify-between gap-4 border-b border-paper/10 pb-4 mt-2">
-                <div>
-                  {selectedArticle.pdfLink ? (
+                <div className="flex flex-wrap gap-2.5">
+                  {selectedArticle.pdfLink && (
                     <a 
                       href={selectedArticle.pdfLink}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="bg-blood/15 border border-blood/40 hover:bg-blood/25 text-paper/80 hover:text-paper font-sans text-[9px] font-bold tracking-widest uppercase py-2.5 px-4 rounded-sm flex items-center gap-1.5 transition-colors cursor-pointer"
-                      title="Download fully cited PDF report file"
+                      className="bg-paper/5 border border-paper/15 hover:bg-paper/10 text-paper/80 hover:text-paper font-sans text-[9px] font-bold tracking-widest uppercase py-2.5 px-4 rounded-sm flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Download the static original pre-compiled PDF report"
                     >
-                      <FileText size={10} /> Reference Report PDF <Download size={10} />
+                      <FileText size={10} /> Original File
                     </a>
-                  ) : (
-                    <div className="font-mono text-[9px] text-paper/30 uppercase tracking-widest">
-                      Verified Research Analysis
-                    </div>
                   )}
+                  <button 
+                    onClick={() => compileScholarlyPDF(selectedArticle)}
+                    className="bg-blood/15 border border-blood/40 hover:bg-blood/25 text-paper/90 hover:text-paper font-sans text-[9px] font-bold tracking-widest uppercase py-2.5 px-4 rounded-sm flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Compile a fresh, beautifully typeset scholarly PDF offprint in multi-column format with bibliography"
+                  >
+                    <FileText size={10} /> Compile Scholarly PDF <Download size={10} />
+                  </button>
                 </div>
 
                 {/* Custom sharing widget with beautiful dropdown & Instagram guide */}
@@ -762,17 +1033,41 @@ export default function App() {
               </div>
 
               {/* ARTICLE BODY OR RESPONSIVE CANVA ENGINE EMBED */}
+              {!selectedArticle.canvaEmbed && (
+                <div className="flex flex-col sm:flex-row justify-between items-center bg-navy/20 border border-paper/10 p-4 rounded-sm mb-4 select-none gap-4">
+                  <div className="flex items-center gap-3">
+                    <Award size={18} className="text-blood shrink-0" />
+                    <div>
+                      <h4 className="font-display text-xs font-bold text-paper/90 uppercase tracking-wider leading-none">
+                        Academic Peer-Review Board
+                      </h4>
+                      <p className="font-serif text-[11px] text-paper/40 mt-1 leading-none">
+                        Line-by-line marginalia and formal critique database.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setAnnotationParagraphIndex(-1);
+                      setAnnotationParagraphText(undefined);
+                      setIsMarginaliaOpen(true);
+                    }}
+                    className="font-sans text-[9px] uppercase tracking-widest bg-blood hover:bg-blood-light text-paper py-2 px-4 rounded-sm font-bold shadow transition-all cursor-pointer shrink-0"
+                  >
+                    Access Debate Portal
+                  </button>
+                </div>
+              )}
+
+              {/* ARTICLE BODY OR RESPONSIVE CANVA ENGINE EMBED */}
               {selectedArticle.canvaEmbed ? (
                 // If Canva Embed field is populated, mount responsive iframe container & hide text blocks
                 <div className="my-4">
                   <CanvaEmbed embedSource={selectedArticle.canvaEmbed} />
                 </div>
               ) : (
-                // Standard Article Text Body (safely parsed html from Quill)
-                <div 
-                  className="font-serif text-base md:text-lg leading-relaxed text-paper/70 flex flex-col gap-5 select-text selection:bg-blood selection:text-paper"
-                  dangerouslySetInnerHTML={{ __html: selectedArticle.content }}
-                />
+                // Interactively parsed body content with inline annotations
+                renderInteractiveContent(selectedArticle.content)
               )}
 
               {/* Custom Tags chips footer */}
@@ -801,30 +1096,63 @@ export default function App() {
               {/* Related scholarly references citation index bibliography */}
               <SourcesSection sources={selectedArticle.sources || []} />
 
-              {/* Related Articles suggestions shelf bar */}
-              {articles.filter(a => a.id !== selectedArticle.id && a.category === selectedArticle.category).length > 0 && (
-                <div className="border border-paper/10 bg-navy/30 p-6 rounded-sm mt-8 select-none">
-                  <h4 className="font-sans text-[10px] font-bold tracking-widest uppercase text-blood mb-4 border-b border-paper/5 pb-1.5">
-                    Related Research Analyses
-                  </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {articles
-                      .filter(a => a.id !== selectedArticle.id && a.category === selectedArticle.category && a.status === 'published')
-                      .slice(0, 2)
-                      .map((relArt) => (
-                        <div 
-                          key={relArt.id}
-                          onClick={() => handleArticleClick(relArt)}
-                          className="border border-paper/5 p-4 rounded-sm bg-midnight/50 hover:border-blood cursor-pointer transition-colors"
-                        >
-                          <span className="font-sans text-[8px] uppercase tracking-wider text-paper/30 block mb-1">
-                            {relArt.category} {relArt.readTime && `· ${relArt.readTime}`}
-                          </span>
-                          <h5 className="font-display text-sm font-bold text-paper/90 line-clamp-1">
+              {/* Automated "Related Investigations" Footer */}
+              {relatedInvestigations.length > 0 && (
+                <div className="border border-paper/10 bg-[#0a0a0a] p-6 rounded-sm mt-8 select-none">
+                  <div className="flex flex-col gap-1 mb-5 border-b border-paper/5 pb-3">
+                    <h4 className="font-sans text-[10px] font-bold tracking-widest uppercase text-blood">
+                      Related Investigations &amp; Syntheses
+                    </h4>
+                    <p className="font-serif text-[11px] text-paper/40 italic">
+                      Trace overlapping analytical themes, tags, and complementary power systems across other research documents.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                    {relatedInvestigations.map(({ article: relArt, score, sharedTags }) => (
+                      <div 
+                        key={relArt.id}
+                        onClick={() => {
+                          handleArticleClick(relArt);
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className="group border border-paper/5 p-4 rounded-sm bg-midnight/30 hover:border-blood/50 cursor-pointer transition-all flex flex-col justify-between hover:bg-paper/[0.01]"
+                      >
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="font-sans text-[8px] uppercase tracking-wider text-paper/40">
+                              {relArt.category} · {relArt.readTime || '5 min read'}
+                            </span>
+                            <span className="font-mono text-[8px] text-blood/60 font-semibold uppercase tracking-wider">
+                              Match score: {score}
+                            </span>
+                          </div>
+                          
+                          <h5 className="font-display text-sm font-bold text-paper/90 group-hover:text-blood transition-colors line-clamp-2 leading-snug">
                             {relArt.title}
                           </h5>
+                          
+                          <p className="font-serif text-[11px] text-paper/40 line-clamp-2 leading-relaxed">
+                            {relArt.excerpt || relArt.subtitle}
+                          </p>
                         </div>
-                      ))}
+
+                        {/* Cross-Document Shared Themes Display */}
+                        {sharedTags.length > 0 && (
+                          <div className="mt-3 pt-2 border-t border-paper/5 flex flex-wrap gap-1.5 items-center">
+                            <span className="font-sans text-[8px] text-blood uppercase tracking-wider font-semibold">Shared Themes:</span>
+                            {sharedTags.slice(0, 3).map(tag => (
+                              <span key={tag} className="font-mono text-[9px] text-paper/40">
+                                #{tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        
+                        <div className="mt-3 text-right font-sans text-[8px] font-bold uppercase tracking-wider text-paper/30 group-hover:text-blood transition-colors">
+                          Trace Overlap →
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -854,6 +1182,18 @@ export default function App() {
         <Footer 
           setActiveTab={setActiveTab} 
           setCategoryFilter={setCategoryFilter} 
+        />
+      )}
+
+      {/* Interactive Marginalia Side Drawer / Debate Portal Panel */}
+      {selectedArticle && (
+        <MarginaliaPanel 
+          isOpen={isMarginaliaOpen}
+          onClose={() => setIsMarginaliaOpen(false)}
+          articleId={selectedArticle.id}
+          articleTitle={selectedArticle.title}
+          paragraphIndex={annotationParagraphIndex}
+          paragraphText={annotationParagraphText}
         />
       )}
 

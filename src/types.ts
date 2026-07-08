@@ -101,3 +101,38 @@ export interface SystemSettings {
   siteHeadline: string;
   siteSubheading: string;
 }
+
+export interface ViewLog {
+  id?: string;
+  articleId: string;
+  articleTitle: string;
+  category: string;
+  timestamp: number; // millisecond timestamp
+  userAgent?: string;
+  referrer?: string;
+}
+
+export interface PeerReply {
+  id: string;
+  authorName: string;
+  authorTitle: string;
+  isVerifiedPeer: boolean;
+  content: string;
+  timestamp: number;
+}
+
+export interface PeerAnnotation {
+  id?: string;
+  articleId: string;
+  paragraphIndex: number; // Index of the paragraph in the article, or -1 for general notes
+  selectedText?: string;  // Context/excerpt from the paragraph
+  authorName: string;
+  authorTitle: string;    // e.g. "PhD Candidate, Forensic Psychology"
+  authorInstitution?: string; // e.g. "Tata Institute of Social Sciences"
+  isVerifiedPeer: boolean; // Approved / expert status indicator
+  content: string;
+  timestamp: number;
+  likes: number;          // Scholarly upvotes/endorsements
+  replies: PeerReply[];   // Nested replies
+}
+

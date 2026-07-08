@@ -12,8 +12,9 @@ import {
   query 
 } from 'firebase/firestore';
 import { signOut, updatePassword } from 'firebase/auth';
-import { Article, ReadingItem, ResearchTip, ArticleVersion } from '../types';
+import { Article, ReadingItem, ResearchTip, ArticleVersion, PeerAnnotation } from '../types';
 import QuillEditor from './QuillEditor';
+import AnalyticsDashboard from './AnalyticsDashboard';
 import { 
   Plus, 
   FileEdit, 
@@ -37,7 +38,9 @@ import {
   Upload,
   Send,
   FileSpreadsheet,
-  FileUp
+  FileUp,
+  MessageSquare,
+  Shield
 } from 'lucide-react';
 
 // Helper to recursively scrub undefined values from object payloads before sending to Firestore
@@ -71,7 +74,7 @@ interface AdminDashboardProps {
 }
 
 export default function AdminDashboard({ onLogout, allArticles, refreshArticles }: AdminDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'write' | 'articles' | 'tips' | 'reading' | 'analytics' | 'settings' | 'subscribers'>('write');
+  const [activeTab, setActiveTab] = useState<'write' | 'articles' | 'tips' | 'reading' | 'analytics' | 'settings' | 'subscribers' | 'discourse'>('write');
   
   // Write Form States
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -135,11 +138,22 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   const [isSendingCampaign, setIsSendingCampaign] = useState(false);
   const [campaignSuccessCount, setCampaignSuccessCount] = useState<number | null>(null);
 
+  // Peer Discourse / Marginalia Board Moderation State
+  const [allReviews, setAllReviews] = useState<PeerAnnotation[]>([]);
+  const [unverifiedReviewsCount, setUnverifiedReviewsCount] = useState(0);
+
+  // Sandbox-compatible custom deletion confirmation states
+  const [deleteConfirmReviewId, setDeleteConfirmReviewId] = useState<string | null>(null);
+  const [deleteConfirmReplyId, setDeleteConfirmReplyId] = useState<{ reviewId: string; replyId: string } | null>(null);
+  const [deleteConfirmSubscriberId, setDeleteConfirmSubscriberId] = useState<string | null>(null);
+  const [deleteConfirmArticleId, setDeleteConfirmArticleId] = useState<string | null>(null);
+
   useEffect(() => {
     // Load Tips, Subscribers, and Reading Stack
     loadTips();
     loadSubscribers();
     loadReadingStack();
+    loadReviews();
 
     // Auto-save loop: triggers every 15 seconds if content changes
     const autoSaveInterval = setInterval(() => {
@@ -176,6 +190,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   };
 
   const loadSubscribers = async () => {
+    // Load Subscribers list
     try {
       const col = collection(db, 'subscribers');
       const snap = await getDocs(col);
@@ -183,6 +198,59 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
       setSubscribers(list);
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const loadReviews = async () => {
+    try {
+      const col = collection(db, 'peer_reviews');
+      const q = query(col, orderBy('timestamp', 'desc'));
+      const snap = await getDocs(q);
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as PeerAnnotation));
+      setAllReviews(list);
+      setUnverifiedReviewsCount(list.filter(r => !r.isVerifiedPeer).length);
+    } catch (e) {
+      console.error("Error loading reviews for admin moderation:", e);
+    }
+  };
+
+  const handleToggleVerifyReview = async (reviewId: string, currentStatus: boolean) => {
+    try {
+      await updateDoc(doc(db, 'peer_reviews', reviewId), {
+        isVerifiedPeer: !currentStatus
+      });
+      setAlert({ text: `Peer review verification toggled successfully.`, type: 'success' });
+      await loadReviews();
+    } catch (e: any) {
+      setAlert({ text: `Failed to update verification status: ${e.message}`, type: 'error' });
+    }
+  };
+
+  const handleDeleteReview = async (reviewId: string) => {
+    try {
+      await deleteDoc(doc(db, 'peer_reviews', reviewId));
+      setAlert({ text: 'Peer review successfully deleted.', type: 'success' });
+      setDeleteConfirmReviewId(null);
+      await loadReviews();
+    } catch (e: any) {
+      setAlert({ text: `Failed to delete peer review: ${e.message}`, type: 'error' });
+    }
+  };
+
+  const handleDeleteReply = async (reviewId: string, replyId: string) => {
+    try {
+      const reviewDocRef = doc(db, 'peer_reviews', reviewId);
+      const review = allReviews.find(r => r.id === reviewId);
+      if (!review) return;
+      const updatedReplies = review.replies.filter((r: any) => r.id !== replyId);
+      await updateDoc(reviewDocRef, {
+        replies: updatedReplies
+      });
+      setAlert({ text: 'Reply successfully removed from discourse.', type: 'success' });
+      setDeleteConfirmReplyId(null);
+      await loadReviews();
+    } catch (e: any) {
+      setAlert({ text: `Failed to delete reply: ${e.message}`, type: 'error' });
     }
   };
 
@@ -216,11 +284,11 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
   // Delete Newsletter Subscriber from Registry
   const handleDeleteSubscriber = async (id: string) => {
-    if (!window.confirm('Are you sure you want to remove this subscriber? This is permanent.')) return;
     try {
       await deleteDoc(doc(db, 'subscribers', id));
       setSubscribers(prev => prev.filter(s => s.id !== id));
       setAlert({ text: 'Subscriber successfully removed from mailing list.', type: 'success' });
+      setDeleteConfirmSubscriberId(null);
     } catch (e: any) {
       setAlert({ text: `Failed to delete subscriber: ${e.message}`, type: 'error' });
     }
@@ -677,10 +745,10 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   };
 
   const handleDeleteArticle = async (id: string) => {
-    if (!window.confirm('Are you absolutely certain you want to permanently delete this research article? This cannot be undone.')) return;
     try {
       await deleteDoc(doc(db, 'articles', id));
       setAlert({ text: 'Article deleted successfully.', type: 'success' });
+      setDeleteConfirmArticleId(null);
       await refreshArticles();
     } catch (e: any) {
       setAlert({ text: `Deletion failed: ${e.message}`, type: 'error' });
@@ -832,6 +900,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
             { id: 'write', label: '✏ Write Post' },
             { id: 'articles', label: '📋 All Articles' },
             { id: 'tips', label: `📬 Tips (${tips.filter(t => !t.isRead).length})` },
+            { id: 'discourse', label: `💬 Peer Discourse (${unverifiedReviewsCount})` },
             { id: 'reading', label: '📚 Reading shelf' },
             { id: 'subscribers', label: `📧 Subscribers (${subscribers.length})` },
             { id: 'analytics', label: '📊 Analytics' },
@@ -1376,13 +1445,31 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                               >
                                 <Copy size={13} />
                               </button>
-                              <button 
-                                onClick={() => handleDeleteArticle(art.id)}
-                                className="p-1.5 border border-paper/10 text-paper/30 hover:text-red-400 hover:border-red-400/40 transition-colors rounded-sm cursor-pointer"
-                                title="Delete Post"
-                              >
-                                <Trash2 size={13} />
-                              </button>
+                              {deleteConfirmArticleId === art.id ? (
+                                <div className="flex items-center gap-1 bg-red-950/40 border border-red-900/50 p-1 px-1.5 rounded-sm text-[9px] font-sans">
+                                  <span className="text-red-400 font-bold uppercase tracking-wider text-[7px] mr-1">Delete?</span>
+                                  <button
+                                    onClick={() => handleDeleteArticle(art.id)}
+                                    className="bg-red-800 hover:bg-red-700 text-white font-bold px-1.5 py-0.5 rounded-sm cursor-pointer text-[7px] uppercase"
+                                  >
+                                    Yes
+                                  </button>
+                                  <button
+                                    onClick={() => setDeleteConfirmArticleId(null)}
+                                    className="bg-paper/10 hover:bg-paper/20 text-paper/70 font-bold px-1.5 py-0.5 rounded-sm cursor-pointer text-[7px] uppercase"
+                                  >
+                                    No
+                                  </button>
+                                </div>
+                              ) : (
+                                <button 
+                                  onClick={() => setDeleteConfirmArticleId(art.id)}
+                                  className="p-1.5 border border-paper/10 text-paper/30 hover:text-red-400 hover:border-red-400/40 transition-colors rounded-sm cursor-pointer"
+                                  title="Delete Post"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -1540,72 +1627,10 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
           {/* ══ TAB 5: PLATFORM ANALYTICS ══ */}
           {activeTab === 'analytics' && (
-            <div className="flex flex-col gap-6 fade-in select-text">
-              
-              {/* Analytics bento counters */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-navy border border-paper/10 p-5 rounded-sm text-center">
-                  <span className="font-display text-3xl font-extrabold text-paper/95 block">{allArticles.filter(a => a.status === 'published').length}</span>
-                  <span className="font-sans text-[9px] font-bold tracking-widest uppercase text-paper/30 mt-1 block">Articles Live</span>
-                </div>
-                <div className="bg-navy border border-paper/10 p-5 rounded-sm text-center">
-                  <span className="font-display text-3xl font-extrabold text-paper/95 block">{allArticles.filter(a => a.status === 'draft').length}</span>
-                  <span className="font-sans text-[9px] font-bold tracking-widest uppercase text-paper/30 mt-1 block">Draft Vault</span>
-                </div>
-                <div className="bg-navy border border-paper/10 p-5 rounded-sm text-center">
-                  <span className="font-display text-3xl font-extrabold text-paper/95 block">{allArticles.reduce((acc, a) => acc + (a.views || 0), 0)}</span>
-                  <span className="font-sans text-[9px] font-bold tracking-widest uppercase text-paper/30 mt-1 block">Scholarly Hits</span>
-                </div>
-                <div className="bg-navy border border-paper/10 p-5 rounded-sm text-center">
-                  <span className="font-display text-3xl font-extrabold text-paper/95 block">{subscribers.length}</span>
-                  <span className="font-sans text-[9px] font-bold tracking-widest uppercase text-paper/30 mt-1 block">Subscribers</span>
-                </div>
-              </div>
-
-              {/* Grid: Popular Articles & Newsletter Growth */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start select-text">
-                
-                {/* Popular posts */}
-                <div className="flex flex-col gap-4">
-                  <h3 className="font-display text-base font-bold text-paper border-b border-paper/5 pb-2 flex items-center gap-2">
-                    <TrendingUp size={14} className="text-blood" /> Popular Analyses Indexed
-                  </h3>
-                  <div className="flex flex-col gap-2.5">
-                    {[...allArticles].sort((a,b) => (b.views||0) - (a.views||0)).slice(0, 5).map((art, index) => (
-                      <div key={art.id} className="bg-navy/50 p-3 rounded-sm border border-paper/5 flex justify-between items-center text-xs text-paper/70 font-serif">
-                        <span className="truncate max-w-sm">
-                          <strong>{index + 1}.</strong> {art.title}
-                        </span>
-                        <span className="font-mono text-[10px] text-paper/40 shrink-0">
-                          <Eye size={10} className="inline mr-1" /> {art.views || 0} hits
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Newsletter Subscriber base logs */}
-                <div className="flex flex-col gap-4">
-                  <h3 className="font-display text-base font-bold text-paper border-b border-paper/5 pb-2 flex items-center gap-2">
-                    <Mail size={14} className="text-blood" /> Active Newsletter Registry
-                  </h3>
-                  <div className="flex flex-col gap-2.5 max-h-[220px] overflow-y-auto pr-2 divide-y divide-paper/5">
-                    {subscribers.length === 0 ? (
-                      <p className="font-serif italic text-xs text-paper/30 py-4 text-center">No active subscribers currently.</p>
-                    ) : (
-                      subscribers.map((sub, idx) => (
-                        <div key={idx} className="pt-2 flex justify-between items-center text-xs font-serif text-paper/60">
-                          <span className="select-text">{sub.email}</span>
-                          <span className="font-mono text-[9px] text-paper/30">
-                            {new Date(sub.subscribedAt).toLocaleDateString('en-GB')}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <AnalyticsDashboard 
+              allArticles={allArticles} 
+              subscribersCount={subscribers.length} 
+            />
           )}
 
           {/* ══ TAB 6: SECURITY & SETTINGS ══ */}
@@ -1687,13 +1712,31 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                               <span className="font-mono text-[9px] text-paper/30">
                                 {new Date(sub.subscribedAt || Date.now()).toLocaleDateString('en-GB')}
                               </span>
-                              <button
-                                onClick={() => handleDeleteSubscriber(sub.id)}
-                                className="text-red-400/60 hover:text-red-400 hover:bg-red-950/20 p-1 rounded-sm cursor-pointer transition-all"
-                                title="Remove subscriber"
-                              >
-                                <Trash2 size={11} />
-                              </button>
+                              {deleteConfirmSubscriberId === sub.id ? (
+                                <div className="flex items-center gap-1 bg-red-950/30 border border-red-900/40 p-1 px-1.5 rounded-sm scale-95 origin-right">
+                                  <span className="font-sans text-[7px] uppercase tracking-wider text-red-400 font-bold mr-1">Remove?</span>
+                                  <button
+                                    onClick={() => handleDeleteSubscriber(sub.id)}
+                                    className="font-sans text-[7px] bg-red-800 hover:bg-red-700 text-white font-bold px-1.5 py-0.5 rounded-sm cursor-pointer"
+                                  >
+                                    Yes
+                                  </button>
+                                  <button
+                                    onClick={() => setDeleteConfirmSubscriberId(null)}
+                                    className="font-sans text-[7px] bg-paper/10 hover:bg-paper/20 text-paper/70 font-bold px-1.5 py-0.5 rounded-sm cursor-pointer"
+                                  >
+                                    No
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setDeleteConfirmSubscriberId(sub.id)}
+                                  className="text-red-400/60 hover:text-red-400 hover:bg-red-950/20 p-1 rounded-sm cursor-pointer transition-all"
+                                  title="Remove subscriber"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -1793,6 +1836,170 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ══ TAB 8: PEER DISCOURSE MODERATION ══ */}
+          {activeTab === 'discourse' && (
+            <div className="flex flex-col gap-6 fade-in select-text">
+              <div className="font-serif text-sm text-paper/50 bg-navy/30 border border-paper/10 p-5 rounded-sm leading-relaxed">
+                ACADEMIC DISCOURSE MODERATION CORE: Review and verify research annotations, critical peer reviews, and reader feedback on articles. Verified Peers will receive a highlighted badge across the public paper portal.
+              </div>
+
+              <div className="flex flex-col gap-4">
+                {allReviews.length === 0 ? (
+                  <div className="border border-dashed border-paper/10 p-10 text-center text-paper/30 italic rounded-sm">
+                    No peer annotations or reviews logged in the database currently.
+                  </div>
+                ) : (
+                  allReviews.map((review) => {
+                    const linkedArticle = allArticles.find(a => a.id === review.articleId);
+                    return (
+                      <div 
+                        key={review.id} 
+                        className={`border p-5 rounded-sm flex flex-col gap-4 bg-navy/10 ${
+                          review.isVerifiedPeer 
+                            ? 'border-green-950 bg-green-950/5' 
+                            : 'border-paper/10'
+                        }`}
+                      >
+                        {/* Upper Meta */}
+                        <div className="flex flex-wrap justify-between items-start gap-4 border-b border-paper/5 pb-3">
+                          <div>
+                            <span className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2 py-0.5 rounded-sm border mr-3 ${
+                              review.isVerifiedPeer 
+                                ? 'bg-green-950/20 text-green-400 border-green-800/30' 
+                                : 'bg-yellow-950/10 text-yellow-500 border-yellow-800/30'
+                            }`}>
+                              {review.isVerifiedPeer ? 'Verified Expert' : 'Pending Verification'}
+                            </span>
+                            <span className="font-sans text-[10px] text-paper/50">
+                              Logged on: {new Date(review.timestamp).toLocaleString()}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2.5">
+                            {deleteConfirmReviewId === review.id ? (
+                              <div className="flex items-center gap-2 bg-red-950/20 border border-red-900/40 p-1 px-2.5 rounded-sm">
+                                <span className="font-sans text-[8px] uppercase tracking-wider text-red-400 font-bold">
+                                  Confirm Delete?
+                                </span>
+                                <button
+                                  onClick={() => handleDeleteReview(review.id!)}
+                                  className="font-sans text-[8px] bg-red-800 hover:bg-red-700 text-white font-bold uppercase px-2 py-0.5 rounded-sm cursor-pointer"
+                                >
+                                  Yes
+                                </button>
+                                <button
+                                  onClick={() => setDeleteConfirmReviewId(null)}
+                                  className="font-sans text-[8px] bg-paper/10 hover:bg-paper/20 text-paper/70 font-bold uppercase px-2 py-0.5 rounded-sm cursor-pointer"
+                                >
+                                  No
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleToggleVerifyReview(review.id!, review.isVerifiedPeer)}
+                                  className={`font-sans text-[8px] tracking-wider uppercase px-2.5 py-1 rounded-sm cursor-pointer transition-colors border ${
+                                    review.isVerifiedPeer
+                                      ? 'border-yellow-800/40 hover:border-yellow-500 text-yellow-500 hover:text-white'
+                                      : 'border-green-800/40 hover:border-green-500 text-green-400 hover:text-white'
+                                  }`}
+                                >
+                                  {review.isVerifiedPeer ? 'Revoke Verification' : 'Verify Expert Scholar'}
+                                </button>
+                                <button
+                                  onClick={() => setDeleteConfirmReviewId(review.id!)}
+                                  className="font-sans text-[8px] tracking-wider uppercase border border-red-900/30 hover:border-red-500 px-2.5 py-1 text-red-400 hover:text-white rounded-sm cursor-pointer transition-colors"
+                                >
+                                  Delete Review
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Scholar profile */}
+                        <div className="bg-midnight/30 p-3 rounded border border-paper/5 flex flex-col gap-1 select-text">
+                          <span className="font-sans text-[8px] text-paper/30 uppercase tracking-widest">SUBMITTED BY:</span>
+                          <h4 className="font-display text-sm font-bold text-paper">{review.authorName}</h4>
+                          <p className="font-sans text-[10px] text-blood leading-none">
+                            {review.authorTitle} {review.authorInstitution && `· ${review.authorInstitution}`}
+                          </p>
+                        </div>
+
+                        {/* Article & Paragraph reference */}
+                        <div className="bg-navy/30 p-3 rounded-sm border border-paper/5 text-xs text-paper/50 select-text flex flex-col gap-1 font-serif leading-relaxed">
+                          <div className="flex items-center gap-1.5 font-sans text-[9px] uppercase text-paper/35 tracking-wider">
+                            <BookOpen size={10} />
+                            <span>Linked Article Reference:</span>
+                          </div>
+                          <span className="text-paper/80 font-bold font-display">{linkedArticle ? linkedArticle.title : review.articleId}</span>
+                          <span className="font-sans text-[9px] uppercase tracking-wider text-blood">
+                            {review.paragraphIndex === -1 ? 'General Paper Review Note' : `Paragraph ${review.paragraphIndex + 1} Marginalia`}
+                          </span>
+                          {review.selectedText && (
+                            <p className="italic text-[11px] text-paper/40 mt-1 pl-2 border-l border-paper/10">
+                              "{review.selectedText.replace(/<[^>]*>/g, '')}"
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Comment Body */}
+                        <div className="select-text space-y-1 pl-1">
+                          <span className="font-sans text-[8px] text-paper/30 uppercase tracking-widest block">REVIEW FEEDBACK CONTENT:</span>
+                          <p className="font-serif text-sm text-paper/85 leading-relaxed whitespace-pre-wrap">
+                            {review.content}
+                          </p>
+                        </div>
+
+                        {/* Nested Replies threads list for administrative moderation */}
+                        {(review.replies || []).length > 0 && (
+                          <div className="border-t border-paper/5 pt-3 mt-1 space-y-2">
+                            <span className="font-sans text-[8px] text-paper/30 uppercase tracking-widest block mb-2">Replies to this node:</span>
+                            {review.replies.map((reply: any) => (
+                              <div key={reply.id} className="bg-midnight/50 p-3 rounded border border-paper/5 flex justify-between items-start gap-4">
+                                <div className="space-y-1 select-text">
+                                  <div className="flex items-center gap-1.5 text-xs">
+                                    <span className="font-display font-semibold text-paper/80">{reply.authorName}</span>
+                                    <span className="text-[9px] text-paper/40">({reply.authorTitle})</span>
+                                  </div>
+                                  <p className="font-serif text-xs text-paper/60 leading-relaxed pl-1">{reply.content}</p>
+                                </div>
+                                {deleteConfirmReplyId?.reviewId === review.id && deleteConfirmReplyId?.replyId === reply.id ? (
+                                  <div className="flex items-center gap-1.5 bg-red-950/25 border border-red-900/30 p-1 px-2 rounded-sm scale-95 origin-right">
+                                    <span className="font-sans text-[7px] uppercase tracking-wider text-red-400 font-bold">Confirm?</span>
+                                    <button
+                                      onClick={() => handleDeleteReply(review.id!, reply.id)}
+                                      className="font-sans text-[7px] bg-red-800 hover:bg-red-700 text-white font-bold px-1.5 py-0.5 rounded-sm cursor-pointer"
+                                    >
+                                      Yes
+                                    </button>
+                                    <button
+                                      onClick={() => setDeleteConfirmReplyId(null)}
+                                      className="font-sans text-[7px] bg-paper/10 hover:bg-paper/20 text-paper/70 font-bold px-1.5 py-0.5 rounded-sm cursor-pointer"
+                                    >
+                                      No
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => setDeleteConfirmReplyId({ reviewId: review.id!, replyId: reply.id })}
+                                    className="text-red-400/50 hover:text-red-400 text-[10px] font-sans uppercase font-bold tracking-wider cursor-pointer"
+                                  >
+                                    Delete
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           )}
