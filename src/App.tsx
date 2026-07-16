@@ -175,16 +175,31 @@ export default function App() {
   const loadData = async () => {
     setLoading(true);
     try {
-      // 1. Seed initial data if Firestore database is empty
-      await seedInitialDataIfEmpty();
-
-      // 2. Load articles
       const articlesCol = collection(db, 'articles');
-      const articlesSnapshot = await getDocs(articlesCol);
-      const articlesList = articlesSnapshot.docs.map(doc => ({
+      const readingCol = collection(db, 'reading');
+
+      // Fetch both collections in parallel to eliminate sequential round-trip latency
+      const [articlesSnapshot, readingSnapshot] = await Promise.all([
+        getDocs(articlesCol),
+        getDocs(readingCol)
+      ]);
+
+      let articlesList = articlesSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       } as Article));
+
+      // Lazy seeding: only execute if the database is actually empty
+      if (articlesSnapshot.empty) {
+        console.log('Database empty. Seeding initial data...');
+        await seedInitialDataIfEmpty();
+        // Re-fetch after seeding
+        const freshSnapshot = await getDocs(articlesCol);
+        articlesList = freshSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        } as Article));
+      }
 
       // Sort: pinned first, then newest
       const sortedArticles = articlesList.sort((a, b) => {
@@ -195,9 +210,6 @@ export default function App() {
 
       setArticles(sortedArticles);
 
-      // 3. Load currently reading books stack
-      const readingCol = collection(db, 'reading');
-      const readingSnapshot = await getDocs(readingCol);
       const readingList = readingSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -955,6 +967,7 @@ export default function App() {
                     alt={selectedArticle.title} 
                     className="w-full h-full object-cover select-none"
                     referrerPolicy="no-referrer"
+                    loading="lazy"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-midnight/40 to-transparent" />
                 </div>
@@ -1038,9 +1051,9 @@ export default function App() {
                   <div className="flex items-center gap-3">
                     <Award size={18} className="text-blood shrink-0" />
                     <div>
-                      <h4 className="font-display text-xs font-bold text-paper/90 uppercase tracking-wider leading-none">
+                      <h3 className="font-display text-xs font-bold text-paper/90 uppercase tracking-wider leading-none">
                         Academic Peer-Review Board
-                      </h4>
+                      </h3>
                       <p className="font-serif text-[11px] text-paper/40 mt-1 leading-none">
                         Line-by-line marginalia and formal critique database.
                       </p>
@@ -1100,9 +1113,9 @@ export default function App() {
               {relatedInvestigations.length > 0 && (
                 <div className="border border-paper/10 bg-[#0a0a0a] p-6 rounded-sm mt-8 select-none">
                   <div className="flex flex-col gap-1 mb-5 border-b border-paper/5 pb-3">
-                    <h4 className="font-sans text-[10px] font-bold tracking-widest uppercase text-blood">
+                    <h3 className="font-sans text-[10px] font-bold tracking-widest uppercase text-blood">
                       Related Investigations &amp; Syntheses
-                    </h4>
+                    </h3>
                     <p className="font-serif text-[11px] text-paper/40 italic">
                       Trace overlapping analytical themes, tags, and complementary power systems across other research documents.
                     </p>
@@ -1127,9 +1140,9 @@ export default function App() {
                             </span>
                           </div>
                           
-                          <h5 className="font-display text-sm font-bold text-paper/90 group-hover:text-blood transition-colors line-clamp-2 leading-snug">
+                          <h4 className="font-display text-sm font-bold text-paper/90 group-hover:text-blood transition-colors line-clamp-2 leading-snug">
                             {relArt.title}
-                          </h5>
+                          </h4>
                           
                           <p className="font-serif text-[11px] text-paper/40 line-clamp-2 leading-relaxed">
                             {relArt.excerpt || relArt.subtitle}
@@ -1163,7 +1176,7 @@ export default function App() {
                   P
                 </div>
                 <div className="text-center sm:text-left flex flex-col gap-1.5">
-                  <h4 className="font-display text-base font-bold text-paper/90 leading-none">Priyasha Priyal Jena</h4>
+                  <h3 className="font-display text-base font-bold text-paper/90 leading-none">Priyasha Priyal Jena</h3>
                   <p className="font-sans text-[9px] font-semibold uppercase tracking-wider text-blood">Founder &amp; Editor-in-Chief</p>
                   <p className="font-serif text-xs text-paper/40 leading-relaxed">
                     Student researcher focusing on criminology, institutional politics, behavior patterns, and forensic studies. Currently studying business while maintaining The Oligarchy as a long-term research registry.

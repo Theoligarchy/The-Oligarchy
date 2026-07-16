@@ -1,5 +1,5 @@
 import { initializeApp, getApp, getApps } from 'firebase/app';
-import { getFirestore, collection, getDocs, doc, setDoc, query, where, orderBy, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, getDocs, doc, setDoc, query, where, orderBy, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 import { Article, ReadingItem, ResearchTip, NewsletterSubscriber } from './types';
@@ -17,7 +17,11 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+}, firebaseConfig.firestoreDatabaseId);
 const auth = getAuth(app);
 const storage = getStorage(app);
 

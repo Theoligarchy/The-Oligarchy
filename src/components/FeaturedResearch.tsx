@@ -22,6 +22,7 @@ export default function FeaturedResearch({ article, onClick }: FeaturedResearchP
             alt={article.title}
             className="absolute inset-0 w-full h-full object-cover opacity-35 group-hover:scale-[1.03] transition-transform duration-700 ease-out"
             referrerPolicy="no-referrer"
+            loading="lazy"
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-blood/30 to-ink opacity-65" />

@@ -75,7 +75,7 @@ async function generateSitemap() {
                 loc: `${siteUrl}/?article=${id}`,
                 lastmod,
                 changefreq: 'monthly',
-                priority: '0.9'
+                priority: '0.6'
               });
             }
           }
