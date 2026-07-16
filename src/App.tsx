@@ -28,6 +28,7 @@ import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import CanvaEmbed from './components/CanvaEmbed';
 import ShareMenu from './components/ShareMenu';
+import { motion, AnimatePresence } from 'motion/react';
 
 import { 
   BookOpen, 
@@ -45,7 +46,8 @@ import {
   CheckCircle2,
   Calendar,
   Award,
-  MessageSquare
+  MessageSquare,
+  Link
 } from 'lucide-react';
 
 import MarginaliaPanel from './components/MarginaliaPanel';
@@ -94,6 +96,37 @@ export default function App() {
   const [isMarginaliaOpen, setIsMarginaliaOpen] = useState(false);
   const [annotationParagraphIndex, setAnnotationParagraphIndex] = useState<number>(-1);
   const [annotationParagraphText, setAnnotationParagraphText] = useState<string | undefined>(undefined);
+
+  // Toast Notification State
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Helper to copy direct deep link URL
+  const handleCopyLink = async (art: Article) => {
+    const baseOrigin = (
+      window.location.origin.includes('run.app') || 
+      window.location.origin.includes('localhost') || 
+      window.location.origin.includes('127.0.0.1')
+    ) ? 'https://theoligarchy.in' : window.location.origin;
+
+    const slugify = (text: string) => {
+      return text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    };
+
+    const shareUrl = art.slug
+      ? `${baseOrigin}/post/${slugify(art.slug)}`
+      : `${baseOrigin}/post/${art.id}`;
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setToastMessage('Link copied to clipboard successfully.');
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (err) {
+      console.error('Failed to copy link:', err);
+    }
+  };
 
   useEffect(() => {
     // Apply permanent dark theme selection to HTML element
@@ -1026,7 +1059,18 @@ export default function App() {
                 </div>
 
                 {/* Custom sharing widget with beautiful dropdown & Instagram guide */}
-                <ShareMenu article={selectedArticle} />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleCopyLink(selectedArticle)}
+                    className="bg-navy/80 hover:bg-blood/20 border border-paper/10 hover:border-blood text-paper/80 hover:text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-2.5 px-4 rounded-sm flex items-center gap-1.5 transition-all duration-300 cursor-pointer shadow-sm select-none"
+                    title="Copy direct deep link to clipboard"
+                    id="copy-link-article-detail"
+                  >
+                    <Link size={12} className="text-blood-light" />
+                    Copy Link
+                  </button>
+                  <ShareMenu article={selectedArticle} />
+                </div>
               </div>
 
               {/* Big Display Headings */}
@@ -1209,6 +1253,22 @@ export default function App() {
           paragraphText={annotationParagraphText}
         />
       )}
+
+      {/* Floating Toast Notification */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.9 }}
+            className="fixed bottom-6 right-6 z-[9999] bg-[#0c0c0c] border border-blood/50 text-paper px-4 py-3 rounded-sm shadow-2xl flex items-center gap-2.5 font-sans text-xs select-none max-w-sm"
+            id="toast-notification-banner"
+          >
+            <CheckCircle2 size={16} className="text-blood-light" />
+            <span className="font-serif italic text-paper/90">{toastMessage}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );
