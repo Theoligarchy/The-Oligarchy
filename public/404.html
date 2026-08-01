@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>THEOLIGARCHY: Independent Research Publication</title>
+    <script type="text/javascript">
+      // GitHub Pages SPA Routing Handler
+      // Converts requested subpath into query parameters and redirects back to root index.html
+      (function() {
+        var pathSegmentsToKeep = 0; // 0 for custom apex domain (theoligarchy.in)
+        var l = window.location;
+        var redirectUrl = l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+          l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/?/' +
+          l.pathname.slice(1).split('/').slice(pathSegmentsToKeep).join('/').replace(/&/g, '~and~') +
+          (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+          l.hash;
+        l.replace(redirectUrl);
+      })();
+    </script>
+  </head>
+  <body>
+  </body>
+</html>

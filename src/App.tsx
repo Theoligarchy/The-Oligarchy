@@ -255,13 +255,13 @@ export default function App() {
 
       // Direct Deep-Linking URL query parameter or path-based support on initial load
       const params = new URLSearchParams(window.location.search);
-      let urlArticleId = params.get('article') || params.get('art');
+      let urlArticleId = params.get('article') || params.get('art') || params.get('p');
       
       if (!urlArticleId) {
-        // Try to parse path-based deep-linking: /post/:slug or /article/:id
-        const pathname = window.location.pathname;
-        const postMatch = pathname.match(/^\/post\/([^\/?#]+)/);
-        const articleMatch = pathname.match(/^\/article\/([^\/?#]+)/);
+        // Try to parse path-based deep-linking: /post/:slug or /article/:id or ?/post/:slug
+        const fullUrlStr = window.location.pathname + window.location.search + window.location.hash;
+        const postMatch = fullUrlStr.match(/[\/?#]post\/([^\/?#&]+)/i);
+        const articleMatch = fullUrlStr.match(/[\/?#]article\/([^\/?#&]+)/i);
         if (postMatch) {
           urlArticleId = postMatch[1];
         } else if (articleMatch) {
@@ -338,6 +338,49 @@ export default function App() {
 
     return () => unsubscribe();
   }, []);
+
+  // Synchronize browser history navigation (Back/Forward buttons)
+  useEffect(() => {
+    const handlePopState = () => {
+      const fullUrlStr = window.location.pathname + window.location.search + window.location.hash;
+      const postMatch = fullUrlStr.match(/[\/?#]post\/([^\/?#&]+)/i);
+      const articleMatch = fullUrlStr.match(/[\/?#]article\/([^\/?#&]+)/i);
+      const urlArticleId = postMatch ? postMatch[1] : (articleMatch ? articleMatch[1] : null);
+
+      if (urlArticleId && articles.length > 0) {
+        let decodedId = urlArticleId;
+        try {
+          decodedId = decodeURIComponent(urlArticleId).trim();
+        } catch (e) {}
+
+        const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').trim();
+        const normalizedTarget = normalize(decodedId);
+
+        const found = articles.find(a => 
+          a.id === decodedId || 
+          a.id === urlArticleId ||
+          (a.slug && a.slug.trim() === decodedId) ||
+          (a.slug && normalize(a.slug) === normalizedTarget) ||
+          (a.title && normalize(a.title) === normalizedTarget)
+        );
+
+        if (found) {
+          setSelectedArticle(found);
+          setActiveTab('article-view');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          return;
+        }
+      }
+
+      if (!urlArticleId && activeTab === 'article-view') {
+        setSelectedArticle(null);
+        setActiveTab('home');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [articles, activeTab]);
 
   // Handle article clicks (and increment read views in Firestore)
   const handleArticleClick = async (art: Article) => {
