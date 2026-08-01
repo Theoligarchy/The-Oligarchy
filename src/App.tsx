@@ -47,7 +47,8 @@ import {
   Calendar,
   Award,
   MessageSquare,
-  Link
+  Link,
+  AlertCircle
 } from 'lucide-react';
 
 import MarginaliaPanel from './components/MarginaliaPanel';
@@ -83,11 +84,14 @@ export default function App() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [readingItems, setReadingItems] = useState<ReadingItem[]>([]);
   const [adminUser, setAdminUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
 
   // Newsletter states
   const [newsletterEmail, setNewsletterEmail] = useState('');
   const [newsletterSuccess, setNewsletterSuccess] = useState(false);
+  const [newsletterError, setNewsletterError] = useState<string | null>(null);
+  const [newsletterTouched, setNewsletterTouched] = useState(false);
+  const [shakeTrigger, setShakeTrigger] = useState(0);
+  const [isSubmittingNewsletter, setIsSubmittingNewsletter] = useState(false);
 
   // Pagination count
   const [articlesPerPage, setArticlesPerPage] = useState<number>(6);
@@ -206,7 +210,6 @@ export default function App() {
   }, [activeTab, selectedArticle]);
 
   const loadData = async () => {
-    setLoading(true);
     try {
       const articlesCol = collection(db, 'articles');
       const readingCol = collection(db, 'reading');
@@ -308,8 +311,6 @@ export default function App() {
 
     } catch (e) {
       console.error("Error loading application data:", e);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -369,26 +370,78 @@ export default function App() {
     }
   };
 
+  // Validate email format with standard email regex
+  const validateEmailFormat = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email.trim());
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setNewsletterEmail(value);
+
+    // Live validation if field has been interacted with or previously errored
+    if (newsletterError || newsletterTouched) {
+      if (!value.trim()) {
+        setNewsletterError('Email address cannot be empty.');
+      } else if (!validateEmailFormat(value)) {
+        setNewsletterError('Please enter a valid email address (e.g., scholar@domain.edu).');
+      } else {
+        setNewsletterError(null);
+      }
+    }
+  };
+
+  const handleEmailBlur = () => {
+    setNewsletterTouched(true);
+    if (!newsletterEmail.trim()) {
+      setNewsletterError('Email address cannot be empty.');
+      setShakeTrigger(prev => prev + 1);
+    } else if (!validateEmailFormat(newsletterEmail)) {
+      setNewsletterError('Please enter a valid email address (e.g., scholar@domain.edu).');
+      setShakeTrigger(prev => prev + 1);
+    } else {
+      setNewsletterError(null);
+    }
+  };
+
   // Handle Newsletter Registration
   const handleSubscribeNewsletter = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newsletterEmail.trim() || !newsletterEmail.includes('@')) {
-      alert('Please provide a valid email address.');
+    setNewsletterTouched(true);
+
+    const trimmed = newsletterEmail.trim();
+    if (!trimmed) {
+      setNewsletterError('Email address cannot be empty.');
+      setShakeTrigger(prev => prev + 1);
       return;
     }
+
+    if (!validateEmailFormat(trimmed)) {
+      setNewsletterError('Please enter a valid email address (e.g., scholar@domain.edu).');
+      setShakeTrigger(prev => prev + 1);
+      return;
+    }
+
+    setNewsletterError(null);
+    setIsSubmittingNewsletter(true);
 
     try {
       const subsCol = collection(db, 'subscribers');
       await addDoc(subsCol, {
-        email: newsletterEmail.trim(),
+        email: trimmed,
         subscribedAt: Date.now()
       });
       setNewsletterEmail('');
       setNewsletterSuccess(true);
+      setNewsletterTouched(false);
       setTimeout(() => setNewsletterSuccess(false), 8000);
     } catch (err) {
       console.error('Newsletter error:', err);
-      alert('A database error occurred. Please try again.');
+      setNewsletterError('A database error occurred. Please try again.');
+      setShakeTrigger(prev => prev + 1);
+    } finally {
+      setIsSubmittingNewsletter(false);
     }
   };
 
@@ -551,17 +604,6 @@ export default function App() {
     setSelectedArticle(null);
     setActiveTab('home');
   };
-
-  // Render Loader screen
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4 bg-midnight text-paper">
-        <div className="w-10 h-10 border-t-2 border-blood rounded-full animate-spin" />
-        <span className="font-gothic text-2xl tracking-widest text-paper/85">The Oligarchy</span>
-        <span className="font-serif text-xs italic text-paper/30">Analyzing systems of power...</span>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex flex-col justify-between bg-[#080808] text-[#e0e0e0]">
@@ -902,25 +944,69 @@ export default function App() {
                 </p>
 
                 {newsletterSuccess ? (
-                  <div className="bg-green-950/20 border border-green-500/30 text-[#8bc4a8] font-serif text-sm p-4 rounded-sm mt-4">
-                    ✓ You have successfully subscribed to The Research Brief list. Welcome to The Oligarchy.
-                  </div>
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-green-950/20 border border-green-500/30 text-[#8bc4a8] font-serif text-sm p-4 rounded-sm mt-4 flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 size={16} className="text-[#8bc4a8]" />
+                    <span>You have successfully subscribed to The Research Brief list. Welcome to The Oligarchy.</span>
+                  </motion.div>
                 ) : (
-                  <form onSubmit={handleSubscribeNewsletter} className="flex max-w-md mx-auto w-full mt-4 select-text">
-                    <input
-                      type="email"
-                      placeholder="Your academic email address..."
-                      value={newsletterEmail}
-                      onChange={(e) => setNewsletterEmail(e.target.value)}
-                      className="bg-midnight border border-paper/10 rounded-l-sm border-r-0 py-3 px-4 text-paper font-serif text-sm focus:outline-none w-full"
-                    />
-                    <button 
-                      type="submit"
-                      className="bg-blood hover:bg-blood-light text-paper font-sans text-xs font-bold tracking-widest uppercase py-3 px-6 rounded-r-sm shadow-md transition-all shrink-0 cursor-pointer"
-                    >
-                      Subscribe
-                    </button>
-                  </form>
+                  <motion.div
+                    key={shakeTrigger}
+                    animate={shakeTrigger > 0 ? { x: [-10, 10, -8, 8, -4, 4, -2, 2, 0] } : { x: 0 }}
+                    transition={{ duration: 0.45, ease: "easeInOut" }}
+                    className="w-full max-w-md mx-auto mt-4"
+                  >
+                    <form onSubmit={handleSubscribeNewsletter} noValidate className="flex flex-col gap-2 select-text w-full">
+                      <div className={`relative flex w-full rounded-sm transition-all duration-300 ${
+                        newsletterError 
+                          ? 'ring-2 ring-blood/80 shadow-[0_0_15px_rgba(139,26,26,0.35)]' 
+                          : 'focus-within:ring-1 focus-within:ring-paper/30'
+                      }`}>
+                        <input
+                          type="email"
+                          placeholder="Your academic email address..."
+                          value={newsletterEmail}
+                          onChange={handleEmailChange}
+                          onBlur={handleEmailBlur}
+                          aria-invalid={Boolean(newsletterError)}
+                          className={`bg-midnight border py-3 px-4 text-paper font-serif text-sm focus:outline-none w-full transition-all rounded-l-sm border-r-0 ${
+                            newsletterError 
+                              ? 'border-blood text-paper placeholder-paper/40 bg-blood/10' 
+                              : 'border-paper/10 text-paper placeholder-paper/40 focus:border-paper/30'
+                          }`}
+                        />
+                        <button 
+                          type="submit"
+                          disabled={isSubmittingNewsletter}
+                          className="bg-blood hover:bg-blood-light disabled:opacity-50 text-paper font-sans text-xs font-bold tracking-widest uppercase py-3 px-6 rounded-r-sm shadow-md transition-all shrink-0 cursor-pointer flex items-center gap-2"
+                        >
+                          {isSubmittingNewsletter ? (
+                            <span className="inline-block animate-spin border-2 border-paper/30 border-t-paper rounded-full w-3.5 h-3.5" />
+                          ) : (
+                            'Subscribe'
+                          )}
+                        </button>
+                      </div>
+
+                      <AnimatePresence>
+                        {newsletterError && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -6, height: 0 }}
+                            animate={{ opacity: 1, y: 0, height: 'auto' }}
+                            exit={{ opacity: 0, y: -6, height: 0 }}
+                            transition={{ duration: 0.2, ease: 'easeOut' }}
+                            className="flex items-center gap-2 text-blood-light font-serif text-xs px-1 text-left mt-1"
+                          >
+                            <AlertCircle size={14} className="shrink-0 text-blood-light" />
+                            <span>{newsletterError}</span>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </form>
+                  </motion.div>
                 )}
               </div>
             </section>
