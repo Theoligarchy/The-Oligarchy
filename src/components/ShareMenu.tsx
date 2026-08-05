@@ -11,7 +11,8 @@ import {
   ExternalLink, 
   Info, 
   X, 
-  ChevronRight
+  ChevronRight,
+  ChevronDown
 } from 'lucide-react';
 import { Article } from '../types';
 
@@ -61,9 +62,23 @@ export default function ShareMenu({ article }: ShareMenuProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+
   const handleCopyLink = async () => {
     try {
-      await navigator.clipboard.writeText(shareUrl);
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = shareUrl;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
@@ -73,7 +88,19 @@ export default function ShareMenu({ article }: ShareMenuProps) {
 
   const handleCopyInstagramCaption = async () => {
     try {
-      await navigator.clipboard.writeText(instagramCaption);
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(instagramCaption);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = instagramCaption;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
       setInstaCaptionCopied(true);
       setTimeout(() => setInstaCaptionCopied(false), 3000);
     } catch (err) {
@@ -81,33 +108,73 @@ export default function ShareMenu({ article }: ShareMenuProps) {
     }
   };
 
-  const handleNativeShare = async () => {
-    if (navigator.share) {
+  const handleNativeShare = async (): Promise<boolean> => {
+    if (canNativeShare) {
       try {
-        await navigator.share({
+        const shareData = {
           title: shareTitle,
           text: shareText,
           url: shareUrl,
-        });
-        setIsOpen(false);
-      } catch (err) {
-        console.log('User cancelled or native share failed: ', err);
+        };
+        if (!navigator.canShare || navigator.canShare(shareData)) {
+          await navigator.share(shareData);
+          setIsOpen(false);
+          return true;
+        }
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          // User cancelled native share sheet
+          return true;
+        }
+        console.warn('Native share failed: ', err);
       }
     }
+    return false;
+  };
+
+  const handlePrimaryShare = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    // Attempt Web Share API first if supported
+    if (canNativeShare) {
+      const handled = await handleNativeShare();
+      if (handled) return;
+    }
+
+    // Fallback for desktop or non-supported Web Share: Copy link directly
+    await handleCopyLink();
   };
 
   return (
     <div className="relative inline-block text-left" ref={menuRef} id="share-menu-container">
-      {/* Main Trigger Share Button */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="bg-navy/80 hover:bg-blood/20 border border-paper/10 hover:border-blood text-paper/80 hover:text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-2.5 px-4 rounded-sm flex items-center gap-2 transition-all duration-300 cursor-pointer shadow-sm select-none"
-        title="Share this research paper"
-        id="share-button-trigger"
-      >
-        <Share2 size={12} className="text-blood-light group-hover:text-blood" />
-        Share Analysis
-      </button>
+      {/* Main Split Trigger Share Button */}
+      <div className="inline-flex items-center rounded-sm border border-paper/10 hover:border-blood/60 bg-navy/80 hover:bg-blood/20 transition-all duration-300 shadow-sm text-paper/80 hover:text-paper font-sans text-[10px] font-bold tracking-widest uppercase overflow-hidden select-none">
+        <button
+          onClick={handlePrimaryShare}
+          className="py-2.5 pl-3.5 pr-2.5 flex items-center gap-2 cursor-pointer hover:text-paper hover:bg-blood/20 transition-colors"
+          title={canNativeShare ? "Share via native app sheet" : "Copy article link to clipboard"}
+          id="share-button-trigger"
+        >
+          {copied ? (
+            <Check size={12} className="text-green-400 shrink-0" />
+          ) : (
+            <Share2 size={12} className="text-blood-light shrink-0" />
+          )}
+          <span>{copied ? 'Link Copied!' : 'Share Analysis'}</span>
+        </button>
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsOpen(!isOpen);
+          }}
+          className="py-2.5 px-2 border-l border-paper/10 hover:border-blood/40 hover:bg-blood/30 text-paper/60 hover:text-paper transition-colors cursor-pointer flex items-center justify-center"
+          title="More sharing options"
+          id="share-dropdown-toggle"
+        >
+          <ChevronDown size={12} className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
+      </div>
 
       {/* Dropdown Menu Container */}
       <AnimatePresence>
