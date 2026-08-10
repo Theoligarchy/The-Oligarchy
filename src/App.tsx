@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Fuse from 'fuse.js';
 import { db, auth, seedInitialDataIfEmpty } from './firebase';
+import { INITIAL_SEED_ARTICLES } from './data/initialSeed';
 import { 
   collection, 
   getDocs, 
@@ -31,6 +32,7 @@ import ShareMenu from './components/ShareMenu';
 import ContributorsSection from './components/ContributorsSection';
 import ReadingListDashboard from './components/ReadingListDashboard';
 import BookmarkButton from './components/BookmarkButton';
+import ArticleSkeleton from './components/ArticleSkeleton';
 import { 
   fetchUserSavedArticles, 
   saveArticleToReadingList, 
@@ -92,8 +94,23 @@ export default function App() {
   // Theme State
   const theme = 'dark';
 
-  // Firebase Datastore States
-  const [articles, setArticles] = useState<Article[]>([]);
+  // Firebase Datastore States with Instant Local Storage Cache (0ms load time)
+  const [articles, setArticles] = useState<Article[]>(() => {
+    try {
+      const cached = localStorage.getItem('tol_cached_articles');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse cached articles:', e);
+    }
+    return INITIAL_SEED_ARTICLES;
+  });
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
+  const [isArticleViewLoading, setIsArticleViewLoading] = useState<boolean>(false);
   const [readingItems, setReadingItems] = useState<ReadingItem[]>([]);
   const [savedArticles, setSavedArticles] = useState<SavedArticle[]>([]);
   const [contributors, setContributors] = useState<AuthorProfile[]>([]);
@@ -262,6 +279,14 @@ export default function App() {
       });
 
       setArticles(sortedArticles);
+      setIsInitialLoading(false);
+
+      // Persist to local cache for 0ms instant load on subsequent visits
+      try {
+        localStorage.setItem('tol_cached_articles', JSON.stringify(sortedArticles));
+      } catch (e) {
+        console.error('Failed to write articles to local cache:', e);
+      }
 
       const readingList = readingSnapshot.docs.map(doc => ({
         id: doc.id,
@@ -339,8 +364,41 @@ export default function App() {
 
     } catch (e) {
       console.error("Error loading application data:", e);
+    } finally {
+      setIsInitialLoading(false);
     }
   };
+
+  // Immediate deep-link resolution from instant local cache/seed
+  useEffect(() => {
+    if (selectedArticle) return;
+    const params = new URLSearchParams(window.location.search);
+    let urlArticleId = params.get('article') || params.get('art') || params.get('p');
+    if (!urlArticleId) {
+      const fullUrlStr = window.location.pathname + window.location.search + window.location.hash;
+      const postMatch = fullUrlStr.match(/[\/?#]post\/([^\/?#&]+)/i);
+      const articleMatch = fullUrlStr.match(/[\/?#]article\/([^\/?#&]+)/i);
+      if (postMatch) urlArticleId = postMatch[1];
+      else if (articleMatch) urlArticleId = articleMatch[1];
+    }
+    if (urlArticleId && articles.length > 0) {
+      let decodedId = urlArticleId;
+      try { decodedId = decodeURIComponent(urlArticleId).trim(); } catch (e) {}
+      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').trim();
+      const normalizedTarget = normalize(decodedId);
+      const matched = articles.find(a => 
+        a.id === decodedId || 
+        a.id === urlArticleId ||
+        (a.slug && a.slug.trim() === decodedId) ||
+        (a.slug && normalize(a.slug) === normalizedTarget) ||
+        (a.title && normalize(a.title) === normalizedTarget)
+      );
+      if (matched) {
+        setSelectedArticle(matched);
+        setActiveTab('article-view');
+      }
+    }
+  }, [articles]);
 
   useEffect(() => {
     loadData();
@@ -448,9 +506,14 @@ export default function App() {
 
   // Handle article clicks (and increment read views in Firestore)
   const handleArticleClick = async (art: Article) => {
+    setIsArticleViewLoading(true);
     setSelectedArticle(art);
     setActiveTab('article-view');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'instant' });
+
+    setTimeout(() => {
+      setIsArticleViewLoading(false);
+    }, 120);
 
     // Synchronize URL with active article for direct deep-linking support using pretty paths
     const slugify = (text: string) => {
@@ -995,7 +1058,21 @@ export default function App() {
 
                 {/* List Grid */}
                 <div className="flex flex-col gap-5 select-text">
-                  {filteredArticles.length === 0 ? (
+                  {isInitialLoading && articles.length === 0 ? (
+                    <div className="flex flex-col gap-5">
+                      {[1, 2, 3].map((n) => (
+                        <div key={n} className="bg-navy/40 border border-paper/10 p-6 rounded-sm animate-pulse flex flex-col gap-3">
+                          <div className="flex justify-between items-center">
+                            <div className="h-3 bg-paper/10 rounded w-1/5"></div>
+                            <div className="h-3 bg-paper/10 rounded w-16"></div>
+                          </div>
+                          <div className="h-6 bg-paper/20 rounded w-3/4"></div>
+                          <div className="h-4 bg-paper/10 rounded w-full"></div>
+                          <div className="h-4 bg-paper/10 rounded w-2/3"></div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : filteredArticles.length === 0 ? (
                     <div className="border border-dashed border-paper/10 p-12 text-center text-paper/30 italic rounded-sm">
                       No analyses logged matching this selection currently. Check back soon.
                     </div>
@@ -1264,8 +1341,11 @@ export default function App() {
         )}
 
         {/* ══ VIEW: FULL SCHOLARLY ARTICLE PAGE ══ */}
-        {activeTab === 'article-view' && selectedArticle && (
-          <div className="py-12 md:py-16 px-6 max-w-5xl mx-auto fade-in select-text">
+        {activeTab === 'article-view' && (
+          isArticleViewLoading || !selectedArticle ? (
+            <ArticleSkeleton />
+          ) : (
+            <div className="py-12 md:py-16 px-6 max-w-5xl mx-auto fade-in select-text">
             {/* Back to Home Navigation */}
             <button 
               onClick={() => {
@@ -1579,6 +1659,7 @@ export default function App() {
 
             </article>
           </div>
+          )
         )}
 
       </main>
