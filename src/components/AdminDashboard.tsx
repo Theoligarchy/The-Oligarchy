@@ -95,6 +95,8 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   const [isPinned, setIsPinned] = useState(false);
   const [seriesName, setSeriesName] = useState('');
   const [seriesPart, setSeriesPart] = useState<number | ''>('');
+  const [authorId, setAuthorId] = useState('priyasha-priyal-jena');
+  const [authorName, setAuthorName] = useState('Priyasha Priyal Jena');
   const [sources, setSources] = useState<Array<{ category: any; title: string; url?: string; citation?: string }>>([]);
   const [selectedVersionIndex, setSelectedVersionIndex] = useState<number | null>(null);
 
@@ -121,6 +123,10 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   // Status/Alert Indicators
   const [alert, setAlert] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [autoSaveActive, setAutoSaveActive] = useState(false);
+
+  // Gemini AI Category & Tags suggestion state
+  const [isSuggestingMetadata, setIsSuggestingMetadata] = useState(false);
+  const [aiMetadataReasoning, setAiMetadataReasoning] = useState<string | null>(null);
 
   // Track editor changes for auto-save
   const lastSavedContent = useRef<string>('');
@@ -554,6 +560,68 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setTags(tags.filter((_, i) => i !== index));
   };
 
+  // Gemini AI Category & Tag auto-suggestion handler
+  const handleSuggestMetadata = async () => {
+    const plainContent = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!title.trim() && !plainContent && !excerpt.trim()) {
+      setAlert({
+        text: 'Please enter an article title, excerpt, or draft text content before requesting Gemini AI suggestions.',
+        type: 'error'
+      });
+      return;
+    }
+
+    setIsSuggestingMetadata(true);
+    setAiMetadataReasoning(null);
+
+    try {
+      const res = await fetch('/api/suggest-metadata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          subtitle,
+          excerpt,
+          content: plainContent.slice(0, 10000)
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Gemini metadata suggestion failed');
+      }
+
+      if (data.category && ['criminology', 'psyche', 'politics'].includes(data.category)) {
+        setCategory(data.category as 'criminology' | 'psyche' | 'politics');
+      }
+
+      if (Array.isArray(data.tags) && data.tags.length > 0) {
+        const cleanedNewTags = data.tags
+          .map((t: string) => t.toLowerCase().replace(/[^a-z0-9\-]/g, '').trim())
+          .filter(Boolean);
+        const mergedTags = Array.from(new Set([...tags, ...cleanedNewTags]));
+        setTags(mergedTags);
+      }
+
+      if (data.reasoning) {
+        setAiMetadataReasoning(data.reasoning);
+      }
+
+      setAlert({
+        text: `✨ Gemini suggested Category: "${(data.category || '').toUpperCase()}" and added ${data.tags?.length || 0} metadata tags!`,
+        type: 'success'
+      });
+    } catch (err: any) {
+      console.error('Gemini metadata suggestion error:', err);
+      setAlert({
+        text: err.message || 'Error generating AI suggestions for category and tags.',
+        type: 'error'
+      });
+    } finally {
+      setIsSuggestingMetadata(false);
+    }
+  };
+
   // Source attachment handlers
   const addSourceItem = () => {
     if (!newSrcTitle.trim()) return;
@@ -656,8 +724,8 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
       featuredImage: featuredImage.trim() || undefined,
       canvaEmbed: canvaEmbed.trim() || undefined,
       pdfLink: pdfLink.trim() || undefined,
-      authorId: 'priyasha-priyal-jena',
-      authorName: 'Priyasha Priyal Jena',
+      authorId: authorId.trim() || 'priyasha-priyal-jena',
+      authorName: authorName.trim() || 'Priyasha Priyal Jena',
       readTime: computedReadTime,
       excerpt: excerpt.trim() || title.trim(),
       content: content,
@@ -717,8 +785,11 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setIsPinned(false);
     setSeriesName('');
     setSeriesPart('');
+    setAuthorId('priyasha-priyal-jena');
+    setAuthorName('Priyasha Priyal Jena');
     setSources([]);
     setSelectedVersionIndex(null);
+    setAiMetadataReasoning(null);
   };
 
   const handleEditArticle = (art: Article) => {
@@ -739,6 +810,8 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setIsPinned(art.isPinned || false);
     setSeriesName(art.seriesName || '');
     setSeriesPart(art.seriesPart || '');
+    setAuthorId(art.authorId || 'priyasha-priyal-jena');
+    setAuthorName(art.authorName || 'Priyasha Priyal Jena');
     setSources(art.sources || []);
     setSelectedVersionIndex(null);
     setActiveTab('write');
@@ -992,6 +1065,43 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
           {activeTab === 'write' && (
             <div className="flex flex-col gap-6 fade-in">
               
+              {/* Gemini AI Smart Assistant Banner */}
+              <div className="bg-gradient-to-r from-navy via-navy to-blood/10 border border-blood/30 p-4 rounded-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 bg-blood/20 rounded-sm text-amber-400 border border-blood/30 shrink-0 mt-0.5">
+                    <Sparkles size={18} className={isSuggestingMetadata ? "animate-spin text-amber-400" : ""} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-sans text-[10px] font-bold tracking-widest uppercase text-amber-400 bg-amber-400/10 border border-amber-400/30 px-2 py-0.5 rounded-sm">
+                        Gemini AI Assistant
+                      </span>
+                      <span className="font-sans text-[10px] font-semibold text-paper/50">
+                        Automatic Categorization &amp; Tagging Engine
+                      </span>
+                    </div>
+                    <p className="font-serif text-xs text-paper/70 leading-relaxed">
+                      Analyze title, excerpt, and draft text with Gemini 3.6 Flash to automatically infer category (<span className="text-blood font-semibold">Criminology</span>, <span className="text-blood font-semibold">Psyche</span>, or <span className="text-blood font-semibold">Politics</span>) and generate relevant search tags.
+                    </p>
+                    {aiMetadataReasoning && (
+                      <div className="mt-2 text-[11px] font-serif italic text-amber-200/90 bg-amber-950/20 border-l-2 border-amber-400 pl-2.5 py-1">
+                        &ldquo;{aiMetadataReasoning}&rdquo;
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSuggestMetadata}
+                  disabled={isSuggestingMetadata}
+                  className="bg-blood/90 hover:bg-blood border border-amber-400/40 hover:border-amber-400 text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-2.5 px-5 rounded-sm flex items-center gap-2 cursor-pointer shrink-0 transition-all shadow-md disabled:opacity-50"
+                >
+                  <Sparkles size={14} className={isSuggestingMetadata ? "animate-spin text-amber-300" : "text-amber-300"} />
+                  {isSuggestingMetadata ? 'Analyzing Draft...' : 'Auto-Suggest Category & Tags'}
+                </button>
+              </div>
+
               {/* Row 1: Title and Slug */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="flex flex-col gap-1.5">
@@ -1008,9 +1118,21 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                    Category *
-                  </label>
+                  <div className="flex justify-between items-center">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                      Category *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleSuggestMetadata}
+                      disabled={isSuggestingMetadata}
+                      className="font-sans text-[9px] font-bold text-amber-400 hover:text-amber-300 tracking-wider uppercase flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                      title="Use Gemini API to auto-detect category based on draft content"
+                    >
+                      <Sparkles size={11} className={isSuggestingMetadata ? "animate-spin" : ""} />
+                      {isSuggestingMetadata ? 'Analyzing...' : 'AI Detect Category'}
+                    </button>
+                  </div>
                   <select
                     value={category}
                     onChange={(e: any) => setCategory(e.target.value)}
@@ -1106,9 +1228,21 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
               {/* Row 4: Custom tags inline constructor */}
               <div className="flex flex-col gap-1.5">
-                <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                  Search Metadata Tags
-                </label>
+                <div className="flex justify-between items-center">
+                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                    Search Metadata Tags
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleSuggestMetadata}
+                    disabled={isSuggestingMetadata}
+                    className="font-sans text-[9px] font-bold text-amber-400 hover:text-amber-300 tracking-wider uppercase flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                    title="Use Gemini API to generate relevant search tags based on draft content"
+                  >
+                    <Sparkles size={11} className={isSuggestingMetadata ? "animate-spin" : ""} />
+                    {isSuggestingMetadata ? 'Generating Tags...' : 'AI Generate Tags'}
+                  </button>
+                </div>
                 <div className="bg-navy border border-paper/10 p-2 rounded-sm flex flex-wrap gap-2 items-center">
                   {tags.map((tag, i) => (
                     <span key={tag} className="font-sans text-[9px] font-semibold bg-blood/15 border border-blood/40 text-red-300 px-2 py-0.5 rounded-sm flex items-center gap-1">
@@ -1360,7 +1494,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
               {/* Publish State Options */}
               <div className="flex flex-wrap gap-4 pt-4 border-t border-paper/10 items-center justify-between">
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-3 items-center">
                   <button
                     onClick={() => handleSavePost('published')}
                     className="bg-blood hover:bg-blood-light text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm shadow-md cursor-pointer"
@@ -1372,6 +1506,15 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                     className="bg-transparent border border-paper/20 hover:border-blood hover:text-paper hover:bg-blood/5 text-paper/60 font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm cursor-pointer transition-colors"
                   >
                     Save as Draft
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSuggestMetadata}
+                    disabled={isSuggestingMetadata}
+                    className="bg-navy border border-amber-400/30 hover:border-amber-400 text-amber-300 hover:text-amber-200 font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-6 rounded-sm flex items-center gap-2 cursor-pointer transition-colors disabled:opacity-50"
+                  >
+                    <Sparkles size={13} className={isSuggestingMetadata ? "animate-spin text-amber-400" : "text-amber-400"} />
+                    {isSuggestingMetadata ? 'Analyzing...' : 'AI Auto-Suggest Category & Tags'}
                   </button>
                 </div>
 

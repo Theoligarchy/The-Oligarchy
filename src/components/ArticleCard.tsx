@@ -2,14 +2,17 @@ import React from 'react';
 import { Article } from '../types';
 import { Eye, Clock, Calendar } from 'lucide-react';
 import ShareMenu from './ShareMenu';
+import BookmarkButton from './BookmarkButton';
 
 interface ArticleCardProps {
   key?: string;
   article: Article;
   onClick: () => void;
+  isSaved?: boolean;
+  onToggleSave?: (article: Article) => void;
 }
 
-export default function ArticleCard({ article, onClick }: ArticleCardProps) {
+export default function ArticleCard({ article, onClick, isSaved = false, onToggleSave }: ArticleCardProps) {
   return (
     <article 
       onClick={onClick}
@@ -17,7 +20,7 @@ export default function ArticleCard({ article, onClick }: ArticleCardProps) {
     >
       {/* Card Header Metadata */}
       <div className="flex justify-between items-start gap-4">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
           {/* Main Category Badge */}
           <span className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-sm border ${
             article.category === 'criminology' 
@@ -29,7 +32,7 @@ export default function ArticleCard({ article, onClick }: ArticleCardProps) {
             {article.category}
           </span>
           
-          {/* Post Type (Case study, etc.) Badge */}
+          {/* Post Type / Series Badge */}
           {article.seriesName && (
             <span className="font-sans text-[9px] font-bold tracking-widest uppercase bg-paper/5 border border-paper/10 text-paper/40 px-2.5 py-1 rounded-sm">
               Series: {article.seriesName} {article.seriesPart && `(Pt. ${article.seriesPart})`}
@@ -37,11 +40,24 @@ export default function ArticleCard({ article, onClick }: ArticleCardProps) {
           )}
         </div>
         
-        {/* Publish Date */}
-        <span className="font-sans text-[10px] text-paper/30 flex items-center gap-1">
-          <Calendar size={11} />
-          {article.publishDate || new Date(article.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-        </span>
+        {/* Right Header: Date & Bookmark Button */}
+        <div className="flex items-center gap-2">
+          <span className="font-sans text-[10px] text-paper/30 flex items-center gap-1">
+            <Calendar size={11} />
+            {article.publishDate || new Date(article.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+          </span>
+
+          {onToggleSave && (
+            <div onClick={(e) => e.stopPropagation()}>
+              <BookmarkButton
+                article={article}
+                isSaved={isSaved}
+                onToggleSave={onToggleSave}
+                variant="icon"
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Article Title */}

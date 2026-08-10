@@ -1,8 +1,12 @@
 import React from 'react';
-import { Instagram, Twitter, Linkedin } from 'lucide-react';
+import { Instagram, Twitter, Linkedin, Users, ArrowRight } from 'lucide-react';
 import { SOCIAL_LINKS } from './Footer';
 
-export default function AboutSection() {
+interface AboutSectionProps {
+  onViewContributors?: () => void;
+}
+
+export default function AboutSection({ onViewContributors }: AboutSectionProps) {
   return (
     <section className="bg-midnight py-16 px-6 md:px-12 max-w-5xl mx-auto fade-in">
       {/* Upper Eyebrow label */}
@@ -108,6 +112,18 @@ export default function AboutSection() {
                 <Linkedin size={10} /> LinkedIn
               </a>
             </div>
+
+            {/* Research Contributors link */}
+            {onViewContributors && (
+              <div className="pt-2 border-t border-paper/10">
+                <button
+                  onClick={onViewContributors}
+                  className="w-full bg-blood/10 hover:bg-blood border border-blood/30 text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-2.5 px-4 rounded-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  <Users size={12} /> View Research Contributors &amp; Board <ArrowRight size={12} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

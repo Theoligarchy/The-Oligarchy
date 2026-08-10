@@ -5,9 +5,11 @@ interface HeaderProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   onSearch: (query: string) => void;
+  savedCount?: number;
 }
 
-export default function Header({ activeTab, setActiveTab, onSearch }: HeaderProps) {
+export default function Header({ activeTab, setActiveTab, onSearch, savedCount = 0 }: HeaderProps) {
+
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [todayDate, setTodayDate] = useState('');
@@ -66,6 +68,8 @@ export default function Header({ activeTab, setActiveTab, onSearch }: HeaderProp
           {[
             { id: 'home', label: 'Home' },
             { id: 'research', label: 'Research Areas' },
+            { id: 'reading-list', label: `Reading List${savedCount > 0 ? ` (${savedCount})` : ''}` },
+            { id: 'contributors', label: 'Contributors' },
             { id: 'principles', label: 'Editorial Principles' },
             { id: 'about', label: 'About' },
             { id: 'contact', label: 'Contact' },
@@ -74,7 +78,7 @@ export default function Header({ activeTab, setActiveTab, onSearch }: HeaderProp
             <button
               key={item.id}
               onClick={() => navigateTo(item.id)}
-              className={`font-sans text-[11px] font-semibold tracking-widest uppercase py-4 px-5 border-r border-paper/10 transition-all duration-200 cursor-pointer ${
+              className={`font-sans text-[11px] font-semibold tracking-widest uppercase py-4 px-4 lg:px-5 border-r border-paper/10 transition-all duration-200 cursor-pointer flex items-center gap-1.5 ${
                 activeTab === item.id 
                   ? 'bg-blood text-paper' 
                   : 'text-paper/60 hover:bg-blood hover:text-paper'
@@ -84,6 +88,7 @@ export default function Header({ activeTab, setActiveTab, onSearch }: HeaderProp
             </button>
           ))}
         </div>
+
 
         {/* Mobile Hamburger Trigger */}
         <button 
@@ -170,6 +175,8 @@ export default function Header({ activeTab, setActiveTab, onSearch }: HeaderProp
           {[
             { id: 'home', label: 'Home' },
             { id: 'research', label: 'Research Areas' },
+            { id: 'reading-list', label: `Reading List${savedCount > 0 ? ` (${savedCount})` : ''}` },
+            { id: 'contributors', label: 'Contributors' },
             { id: 'principles', label: 'Editorial Principles' },
             { id: 'about', label: 'About' },
             { id: 'contact', label: 'Contact' },
@@ -187,6 +194,7 @@ export default function Header({ activeTab, setActiveTab, onSearch }: HeaderProp
           ))}
         </div>
       )}
+
     </header>
   );
 }

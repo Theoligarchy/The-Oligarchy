@@ -2,13 +2,21 @@ import React from 'react';
 import { Article } from '../types';
 import { Eye, Clock, Download, FileText, ArrowRight } from 'lucide-react';
 import ShareMenu from './ShareMenu';
+import BookmarkButton from './BookmarkButton';
 
 interface FeaturedResearchProps {
   article: Article;
   onClick: () => void;
+  isSaved?: boolean;
+  onToggleSave?: (article: Article) => void;
 }
 
-export default function FeaturedResearch({ article, onClick }: FeaturedResearchProps) {
+export default function FeaturedResearch({ 
+  article, 
+  onClick, 
+  isSaved = false, 
+  onToggleSave 
+}: FeaturedResearchProps) {
   return (
     <div 
       onClick={onClick}
@@ -44,9 +52,22 @@ export default function FeaturedResearch({ article, onClick }: FeaturedResearchP
 
       {/* Right: Content details Column */}
       <div className="md:col-span-7 p-6 md:p-10 flex flex-col justify-center gap-5 bg-navy/80 select-text">
-        <h3 className="font-display text-2xl md:text-3xl font-bold text-paper group-hover:underline underline-offset-4 decoration-blood transition-all leading-tight">
-          {article.title}
-        </h3>
+        <div className="flex items-start justify-between gap-4">
+          <h3 className="font-display text-2xl md:text-3xl font-bold text-paper group-hover:underline underline-offset-4 decoration-blood transition-all leading-tight">
+            {article.title}
+          </h3>
+
+          {onToggleSave && (
+            <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+              <BookmarkButton
+                article={article}
+                isSaved={isSaved}
+                onToggleSave={onToggleSave}
+                variant="button"
+              />
+            </div>
+          )}
+        </div>
         
         {article.subtitle && (
           <h4 className="font-display text-base md:text-lg italic text-paper/50 leading-relaxed -mt-2">

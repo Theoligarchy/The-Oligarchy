@@ -1,0 +1,27 @@
+{
+  "short_name": "The Oligarchy",
+  "name": "THEOLIGARCHY — Independent Research Publication",
+  "description": "An independent peer-reviewed and scholarly archive dedicated to investigating criminology, criminal psychology, and political power systems.",
+  "icons": [
+    {
+      "src": "/favicon-192x192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/favicon-144x144.png",
+      "type": "image/png",
+      "sizes": "144x144"
+    },
+    {
+      "src": "/logo_highres.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#080808",
+  "theme_color": "#8b0000",
+  "display": "standalone",
+  "orientation": "portrait"
+}

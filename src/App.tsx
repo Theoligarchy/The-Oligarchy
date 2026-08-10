@@ -12,7 +12,7 @@ import {
   increment
 } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Article, ReadingItem } from './types';
+import { Article, ReadingItem, AuthorProfile, SavedArticle } from './types';
 
 // Import modular subcomponents
 import Header from './components/Header';
@@ -28,7 +28,18 @@ import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import CanvaEmbed from './components/CanvaEmbed';
 import ShareMenu from './components/ShareMenu';
+import ContributorsSection from './components/ContributorsSection';
+import ReadingListDashboard from './components/ReadingListDashboard';
+import BookmarkButton from './components/BookmarkButton';
+import { 
+  fetchUserSavedArticles, 
+  saveArticleToReadingList, 
+  removeArticleFromReadingList, 
+  toggleArticleReadStatus, 
+  updateArticleNote 
+} from './utils/savedArticles';
 import { motion, AnimatePresence } from 'motion/react';
+
 
 import { 
   BookOpen, 
@@ -76,6 +87,7 @@ export default function App() {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
+  const [selectedContributorId, setSelectedContributorId] = useState<string | null>(null);
   
   // Theme State
   const theme = 'dark';
@@ -83,7 +95,10 @@ export default function App() {
   // Firebase Datastore States
   const [articles, setArticles] = useState<Article[]>([]);
   const [readingItems, setReadingItems] = useState<ReadingItem[]>([]);
+  const [savedArticles, setSavedArticles] = useState<SavedArticle[]>([]);
+  const [contributors, setContributors] = useState<AuthorProfile[]>([]);
   const [adminUser, setAdminUser] = useState<User | null>(null);
+
 
   // Newsletter states
   const [newsletterEmail, setNewsletterEmail] = useState('');
@@ -213,11 +228,13 @@ export default function App() {
     try {
       const articlesCol = collection(db, 'articles');
       const readingCol = collection(db, 'reading');
+      const contributorsCol = collection(db, 'contributors');
 
-      // Fetch both collections in parallel to eliminate sequential round-trip latency
-      const [articlesSnapshot, readingSnapshot] = await Promise.all([
+      // Fetch collections in parallel
+      const [articlesSnapshot, readingSnapshot, contributorsSnapshot] = await Promise.all([
         getDocs(articlesCol),
-        getDocs(readingCol)
+        getDocs(readingCol),
+        getDocs(contributorsCol)
       ]);
 
       let articlesList = articlesSnapshot.docs.map(doc => ({
@@ -253,7 +270,18 @@ export default function App() {
       
       setReadingItems(readingList.sort((a,b) => b.addedAt - a.addedAt));
 
+      const contributorsList = contributorsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as AuthorProfile));
+      setContributors(contributorsList);
+
+      // Fetch user saved research reading list
+      const userSavedList = await fetchUserSavedArticles();
+      setSavedArticles(userSavedList);
+
       // Direct Deep-Linking URL query parameter or path-based support on initial load
+
       const params = new URLSearchParams(window.location.search);
       let urlArticleId = params.get('article') || params.get('art') || params.get('p');
       
@@ -338,6 +366,42 @@ export default function App() {
 
     return () => unsubscribe();
   }, []);
+
+  // Saved Reading List Action Handlers
+  const handleToggleSaveArticle = async (article: Article) => {
+    const exists = savedArticles.some(a => a.articleId === article.id);
+    if (exists) {
+      const updated = await removeArticleFromReadingList(article.id);
+      setSavedArticles(updated);
+      setToastMessage(`Removed "${article.title}" from saved reading list.`);
+    } else {
+      const updated = await saveArticleToReadingList(article);
+      setSavedArticles(updated);
+      setToastMessage(`Saved "${article.title}" to reading list.`);
+    }
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleRemoveSavedArticle = async (articleId: string) => {
+    const target = savedArticles.find(a => a.articleId === articleId);
+    const updated = await removeArticleFromReadingList(articleId);
+    setSavedArticles(updated);
+    if (target) {
+      setToastMessage(`Removed "${target.title}" from reading list.`);
+      setTimeout(() => setToastMessage(null), 3000);
+    }
+  };
+
+  const handleToggleReadStatus = async (articleId: string, currentStatus: boolean) => {
+    const updated = await toggleArticleReadStatus(articleId, !currentStatus);
+    setSavedArticles(updated);
+  };
+
+  const handleUpdateNote = async (articleId: string, note: string) => {
+    const updated = await updateArticleNote(articleId, note);
+    setSavedArticles(updated);
+  };
+
 
   // Synchronize browser history navigation (Back/Forward buttons)
   useEffect(() => {
@@ -601,38 +665,70 @@ export default function App() {
     return Array.from(tagsSet).slice(0, 15); // Top 15 tags
   }, [articles]);
 
-  // Calculate Related Investigations dynamically to encourage circular reading
+  // Calculate Related Investigations & Recommended Articles dynamically with weighted scoring (Tags + Authorship)
   const relatedInvestigations = useMemo(() => {
     if (!selectedArticle) return [];
     
     const currentTags = (selectedArticle.tags || []).map(t => t.toLowerCase().trim());
+    const currentAuthorId = selectedArticle.authorId;
+    const currentAuthorName = (selectedArticle.authorName || '').toLowerCase().trim();
     
     return articles
       .filter(art => art.status === 'published' && art.id !== selectedArticle.id)
       .map(art => {
         let score = 0;
-        const artTags = (art.tags || []).map(t => t.toLowerCase().trim());
         
-        // 1. Same category
-        if (art.category === selectedArticle.category) {
-          score += 3;
-        }
-        
-        // 2. Shared tags
+        // 1. Matching Tags Weighting (+3 points per matching tag)
         const sharedTags = (art.tags || []).filter(tag => 
           currentTags.includes(tag.toLowerCase().trim())
         );
-        score += sharedTags.length * 2;
+        const tagScore = sharedTags.length * 3;
+        score += tagScore;
         
-        // 3. Shared series
+        // 2. Overlapping Authorship Weighting (+5 points for shared author)
+        let isSameAuthor = false;
+        let authorMatchName = art.authorName || '';
+        if (currentAuthorId && art.authorId && currentAuthorId === art.authorId) {
+          isSameAuthor = true;
+        } else if (currentAuthorName && art.authorName && art.authorName.toLowerCase().trim() === currentAuthorName) {
+          isSameAuthor = true;
+        } else if (currentAuthorName && art.authorName) {
+          // Check for co-authorship or author name overlap
+          const currentParts = currentAuthorName.split(/[,&]/).map(s => s.trim()).filter(Boolean);
+          const artParts = art.authorName.toLowerCase().split(/[,&]/).map(s => s.trim()).filter(Boolean);
+          const hasOverlap = currentParts.some(cp => artParts.some(ap => ap.includes(cp) || cp.includes(ap)));
+          if (hasOverlap) {
+            isSameAuthor = true;
+          }
+        }
+        if (isSameAuthor) {
+          score += 5;
+        }
+        
+        // 3. Category Alignment (+2 points)
+        if (art.category === selectedArticle.category) {
+          score += 2;
+        }
+        
+        // 4. Shared Series Alignment (+6 points)
+        let isSameSeries = false;
         if (selectedArticle.seriesName && art.seriesName && selectedArticle.seriesName === art.seriesName) {
-          score += 4;
+          score += 6;
+          isSameSeries = true;
+        }
+        
+        // 5. Explicitly linked articles (+8 points)
+        if (selectedArticle.relatedArticles?.includes(art.id) || art.relatedArticles?.includes(selectedArticle.id)) {
+          score += 8;
         }
         
         return { 
           article: art, 
           score, 
-          sharedTags 
+          sharedTags,
+          isSameAuthor,
+          authorMatchName,
+          isSameSeries
         };
       })
       .filter(item => item.score > 0)
@@ -673,8 +769,10 @@ export default function App() {
             window.history.pushState({ path: newUrl }, '', newUrl);
           }}
           onSearch={handleSearch}
+          savedCount={savedArticles.length}
         />
       )}
+
 
       {/* Core Dynamic Screen Routing */}
       <main className="flex-1">
@@ -736,7 +834,13 @@ export default function App() {
                 <div className="font-sans text-[10px] font-bold tracking-[0.35em] text-blood uppercase mb-6 text-center">
                   Focus Research Paper
                 </div>
-                <FeaturedResearch article={featuredPost} onClick={() => handleArticleClick(featuredPost)} />
+                <FeaturedResearch 
+                  article={featuredPost} 
+                  onClick={() => handleArticleClick(featuredPost)} 
+                  isSaved={savedArticles.some(a => a.articleId === featuredPost.id)}
+                  onToggleSave={handleToggleSaveArticle}
+                />
+
               </section>
             )}
 
@@ -897,8 +1001,15 @@ export default function App() {
                     </div>
                   ) : (
                     filteredArticles.slice(0, articlesPerPage).map((art) => (
-                      <ArticleCard key={art.id} article={art} onClick={() => handleArticleClick(art)} />
+                      <ArticleCard 
+                        key={art.id} 
+                        article={art} 
+                        onClick={() => handleArticleClick(art)} 
+                        isSaved={savedArticles.some(a => a.articleId === art.id)}
+                        onToggleSave={handleToggleSaveArticle}
+                      />
                     ))
+
                   )}
                 </div>
 
@@ -919,7 +1030,15 @@ export default function App() {
               <aside className="md:col-span-4 flex flex-col gap-6">
                 
                 {/* Reading Stack widget */}
-                <ReadingStack items={readingItems} />
+                <ReadingStack 
+                  items={readingItems} 
+                  savedArticles={savedArticles}
+                  articles={articles}
+                  onOpenReadingList={() => setActiveTab('reading-list')}
+                  onSelectArticle={handleArticleClick}
+                  onRemoveSaved={handleRemoveSavedArticle}
+                />
+
 
                 {/* Follow Socials widget */}
                 <div className="bg-navy border border-paper/10 rounded-sm overflow-hidden select-none">
@@ -1067,8 +1186,51 @@ export default function App() {
           </div>
         )}
 
+        {/* ══ VIEW: SAVED READING LIST DASHBOARD ══ */}
+        {activeTab === 'reading-list' && (
+          <ReadingListDashboard
+            savedArticles={savedArticles}
+            articles={articles}
+            onSelectArticle={handleArticleClick}
+            onRemoveSaved={handleRemoveSavedArticle}
+            onToggleRead={handleToggleReadStatus}
+            onUpdateNote={handleUpdateNote}
+            onBrowseResearch={() => {
+              setActiveTab('home');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        )}
+
+        {/* ══ VIEW: RESEARCH CONTRIBUTORS PAGE ══ */}
+
+        {activeTab === 'contributors' && (
+          <ContributorsSection 
+            articles={articles}
+            contributors={contributors}
+            selectedContributorId={selectedContributorId}
+            onCloseContributorModal={() => setSelectedContributorId(null)}
+            onSelectArticle={(art) => {
+              setSelectedArticle(art);
+              setActiveTab('article-view');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOpenContact={() => {
+              setActiveTab('contact');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        )}
+
         {/* ══ VIEW: ABOUT PAGE ══ */}
-        {activeTab === 'about' && <AboutSection />}
+        {activeTab === 'about' && (
+          <AboutSection 
+            onViewContributors={() => {
+              setActiveTab('contributors');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        )}
 
         {/* ══ VIEW: EDITORIAL PRINCIPLES PAGE ══ */}
         {activeTab === 'principles' && <EditorialPrinciples />}
@@ -1187,8 +1349,14 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Custom sharing widget with beautiful dropdown & Instagram guide */}
+                {/* Custom sharing widget with beautiful dropdown, bookmark button & Instagram guide */}
                 <div className="flex items-center gap-2">
+                  <BookmarkButton
+                    article={selectedArticle}
+                    isSaved={savedArticles.some(a => a.articleId === selectedArticle.id)}
+                    onToggleSave={handleToggleSaveArticle}
+                    variant="button"
+                  />
                   <button
                     onClick={() => handleCopyLink(selectedArticle)}
                     className="bg-navy/80 hover:bg-blood/20 border border-paper/10 hover:border-blood text-paper/80 hover:text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-2.5 px-4 rounded-sm flex items-center gap-1.5 transition-all duration-300 cursor-pointer shadow-sm select-none"
@@ -1200,6 +1368,7 @@ export default function App() {
                   </button>
                   <ShareMenu article={selectedArticle} />
                 </div>
+
               </div>
 
               {/* Big Display Headings */}
@@ -1213,9 +1382,33 @@ export default function App() {
                 </h2>
               )}
 
-              {/* Scholarly journal style double-rule author line */}
-              <div className="border-y border-double border-paper/20 py-2.5 my-2 text-center md:text-left font-sans text-[10px] font-semibold tracking-[0.18em] uppercase text-paper/45">
-                BY PRIYASHA PRIYAL JENA · EDITOR-IN-CHIEF · THE OLIGARCHY
+              {/* Scholarly journal style double-rule author line with contributor bio link */}
+              <div className="border-y border-double border-paper/20 py-2.5 my-2 font-sans text-[10px] font-semibold tracking-[0.18em] uppercase text-paper/45 flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  BY{' '}
+                  <button
+                    onClick={() => {
+                      setSelectedContributorId(selectedArticle.authorId || 'priyasha-priyal-jena');
+                      setActiveTab('contributors');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="text-paper hover:text-blood underline underline-offset-2 decoration-blood/60 transition-colors cursor-pointer"
+                    title="View Author Bio &amp; Published Research Papers"
+                  >
+                    {selectedArticle.authorName || 'Priyasha Priyal Jena'}
+                  </button>{' '}
+                  · {selectedArticle.authorId === 'priyasha-priyal-jena' || !selectedArticle.authorId ? 'FOUNDER & EDITOR-IN-CHIEF' : 'RESEARCH CONTRIBUTOR'} · THE OLIGARCHY
+                </span>
+                <button
+                  onClick={() => {
+                    setSelectedContributorId(selectedArticle.authorId || 'priyasha-priyal-jena');
+                    setActiveTab('contributors');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="font-sans text-[9px] font-bold tracking-widest uppercase text-blood hover:text-blood-light flex items-center gap-1 cursor-pointer"
+                >
+                  Scholar Bio &amp; Papers &rarr;
+                </button>
               </div>
 
               {/* ARTICLE BODY OR RESPONSIVE CANVA ENGINE EMBED */}
@@ -1282,33 +1475,44 @@ export default function App() {
               {/* Related scholarly references citation index bibliography */}
               <SourcesSection sources={selectedArticle.sources || []} />
 
-              {/* Automated "Related Investigations" Footer */}
+              {/* Automated "Recommended for You" / Related Investigations Footer */}
               {relatedInvestigations.length > 0 && (
-                <div className="border border-paper/10 bg-[#0a0a0a] p-6 rounded-sm mt-8 select-none">
-                  <div className="flex flex-col gap-1 mb-5 border-b border-paper/5 pb-3">
-                    <h3 className="font-sans text-[10px] font-bold tracking-widest uppercase text-blood">
-                      Related Investigations &amp; Syntheses
-                    </h3>
-                    <p className="font-serif text-[11px] text-paper/40 italic">
-                      Trace overlapping analytical themes, tags, and complementary power systems across other research documents.
-                    </p>
+                <div className="border border-paper/10 bg-[#0a0a0a] p-6 rounded-sm mt-10 select-none shadow-md">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 mb-5 border-b border-paper/10 pb-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-sans text-[9px] font-bold tracking-widest uppercase text-blood bg-blood/10 border border-blood/30 px-2 py-0.5 rounded-sm">
+                          Recommended For You
+                        </span>
+                        <span className="font-mono text-[9px] text-paper/40">
+                          Weighted Relevance Algorithm
+                        </span>
+                      </div>
+                      <h3 className="font-display text-base font-bold text-paper tracking-wide">
+                        Related Investigations &amp; Syntheses
+                      </h3>
+                      <p className="font-serif text-xs text-paper/50 italic mt-0.5">
+                        Selected using a weighted relevance algorithm analyzing matching search tags, shared authorship, and series continuity.
+                      </p>
+                    </div>
                   </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                    {relatedInvestigations.map(({ article: relArt, score, sharedTags }) => (
+                    {relatedInvestigations.map(({ article: relArt, score, sharedTags, isSameAuthor, authorMatchName, isSameSeries }) => (
                       <div 
                         key={relArt.id}
                         onClick={() => {
                           handleArticleClick(relArt);
                           window.scrollTo({ top: 0, behavior: 'smooth' });
                         }}
-                        className="group border border-paper/5 p-4 rounded-sm bg-midnight/30 hover:border-blood/50 cursor-pointer transition-all flex flex-col justify-between hover:bg-paper/[0.01]"
+                        className="group border border-paper/10 hover:border-blood/60 p-4 rounded-sm bg-navy/40 hover:bg-navy/80 cursor-pointer transition-all flex flex-col justify-between shadow-sm"
                       >
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center">
-                            <span className="font-sans text-[8px] uppercase tracking-wider text-paper/40">
+                        <div className="space-y-2.5">
+                          <div className="flex justify-between items-center gap-2">
+                            <span className="font-sans text-[8px] font-bold uppercase tracking-wider text-paper/40">
                               {relArt.category} · {relArt.readTime || '5 min read'}
                             </span>
-                            <span className="font-mono text-[8px] text-blood/60 font-semibold uppercase tracking-wider">
+                            <span className="font-mono text-[8px] bg-blood/20 border border-blood/40 text-amber-300 font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm">
                               Match score: {score}
                             </span>
                           </div>
@@ -1317,25 +1521,41 @@ export default function App() {
                             {relArt.title}
                           </h4>
                           
-                          <p className="font-serif text-[11px] text-paper/40 line-clamp-2 leading-relaxed">
+                          <p className="font-serif text-[11px] text-paper/50 line-clamp-2 leading-relaxed">
                             {relArt.excerpt || relArt.subtitle}
                           </p>
                         </div>
 
-                        {/* Cross-Document Shared Themes Display */}
-                        {sharedTags.length > 0 && (
-                          <div className="mt-3 pt-2 border-t border-paper/5 flex flex-wrap gap-1.5 items-center">
-                            <span className="font-sans text-[8px] text-blood uppercase tracking-wider font-semibold">Shared Themes:</span>
-                            {sharedTags.slice(0, 3).map(tag => (
-                              <span key={tag} className="font-mono text-[9px] text-paper/40">
-                                #{tag}
+                        <div className="mt-4 pt-3 border-t border-paper/10 space-y-2">
+                          {/* Reason indicators: Author and Series badges */}
+                          <div className="flex flex-wrap gap-1.5 items-center">
+                            {isSameAuthor && (
+                              <span className="font-sans text-[8px] font-semibold bg-paper/10 border border-paper/20 text-paper/80 px-1.5 py-0.5 rounded-sm flex items-center gap-1">
+                                ✍️ {authorMatchName ? `Author: ${authorMatchName}` : 'Same Author'}
                               </span>
-                            ))}
+                            )}
+                            {isSameSeries && (
+                              <span className="font-sans text-[8px] font-semibold bg-blood/20 border border-blood/40 text-red-300 px-1.5 py-0.5 rounded-sm">
+                                📚 Series Companion
+                              </span>
+                            )}
                           </div>
-                        )}
-                        
-                        <div className="mt-3 text-right font-sans text-[8px] font-bold uppercase tracking-wider text-paper/30 group-hover:text-blood transition-colors">
-                          Trace Overlap →
+
+                          {/* Shared Tags */}
+                          {sharedTags.length > 0 && (
+                            <div className="flex flex-wrap gap-1 items-center">
+                              <span className="font-sans text-[8px] text-blood uppercase tracking-wider font-semibold">Shared Themes:</span>
+                              {sharedTags.slice(0, 3).map(tag => (
+                                <span key={tag} className="font-mono text-[9px] text-paper/50 bg-paper/5 px-1 py-0.2 rounded-xs">
+                                  #{tag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="pt-1 text-right font-sans text-[8px] font-bold uppercase tracking-wider text-paper/30 group-hover:text-blood transition-colors">
+                            Trace Investigation Overlap →
+                          </div>
                         </div>
                       </div>
                     ))}

@@ -2,6 +2,27 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
+import { GoogleGenAI, Type } from '@google/genai';
+
+// Helper: Lazy initialization of Gemini AI Client
+let aiClient: GoogleGenAI | null = null;
+function getGeminiClient(): GoogleGenAI {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY environment variable is missing.');
+    }
+    aiClient = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+  }
+  return aiClient;
+}
 
 // Helper: Firestore REST API Integration
 interface ArticleData {
@@ -177,6 +198,92 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
   const isProd = process.env.NODE_ENV === 'production';
+
+  app.use(express.json({ limit: '10mb' }));
+
+  // API Route: Suggest Category and Tags using Gemini API
+  app.post('/api/suggest-metadata', async (req, res) => {
+    try {
+      const { title = '', subtitle = '', excerpt = '', content = '' } = req.body || {};
+      
+      const combinedText = [title, subtitle, excerpt, content].filter(Boolean).join('\n\n').trim();
+      if (!combinedText) {
+        return res.status(400).json({ error: 'Please enter a title, excerpt, or content for the draft article.' });
+      }
+
+      const ai = getGeminiClient();
+      const prompt = `Analyze the following research draft title, excerpt, and text content for 'The Oligarchy' publication. Determine the single most accurate category and suggest 3 to 6 relevant search/metadata tags.
+
+CATEGORIES (YOU MUST SELECT EXACTLY ONE OF THESE THREE):
+- criminology: focused on crime, law enforcement, forensic science, corruption, criminal justice, investigations, policy.
+- psyche: focused on criminal psychology, behavior, dark triad, mental health, offender profiling, human motives.
+- politics: focused on systems of power, political influence, state corruption, authoritarianism, state policy, governance.
+
+DRAFT DETAILS:
+Title: ${title}
+Subtitle: ${subtitle}
+Excerpt: ${excerpt}
+Text Content Snippet:
+${combinedText.slice(0, 10000)}
+`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.6-flash',
+        contents: prompt,
+        config: {
+          systemInstruction: "You are an expert editorial archivist and criminological research director for 'The Oligarchy' research journal. Select the most accurate primary category ('criminology', 'psyche', or 'politics') and generate clean, concise search keyword tags.",
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              category: {
+                type: Type.STRING,
+                description: 'Must be one of "criminology", "psyche", or "politics"',
+              },
+              tags: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: 'List of 3 to 6 lowercase keyword tags',
+              },
+              reasoning: {
+                type: Type.STRING,
+                description: 'A brief 1-sentence editorial reasoning for why this category and tags were selected.',
+              }
+            },
+            required: ['category', 'tags']
+          }
+        }
+      });
+
+      const responseText = response.text || '{}';
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(responseText);
+      } catch (e) {
+        console.error('Failed to parse Gemini JSON output:', responseText);
+      }
+
+      const validCategories = ['criminology', 'psyche', 'politics'];
+      let suggestedCategory = (parsed.category || '').toLowerCase().trim();
+      if (!validCategories.includes(suggestedCategory)) {
+        suggestedCategory = 'criminology';
+      }
+
+      const rawTags = Array.isArray(parsed.tags) ? parsed.tags : [];
+      const cleanTags = rawTags
+        .map((t: any) => String(t).toLowerCase().replace(/[^a-z0-9\-]/g, '').trim())
+        .filter((t: string) => t.length > 0);
+
+      return res.json({
+        category: suggestedCategory,
+        tags: cleanTags,
+        reasoning: parsed.reasoning || 'Categorized based on primary subject matter and thematic keywords.'
+      });
+    } catch (err: any) {
+      console.error('Error in /api/suggest-metadata route:', err);
+      return res.status(500).json({ error: err.message || 'Error executing Gemini API content analysis.' });
+    }
+  });
 
   let vite: any;
   if (!isProd) {

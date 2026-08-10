@@ -86,6 +86,8 @@ export interface AuthorProfile {
   role: string;
   bio: string;
   avatarUrl?: string;
+  institution?: string;
+  email?: string;
   tags: string[];
   socials: {
     instagram?: string;
@@ -93,6 +95,9 @@ export interface AuthorProfile {
     linkedin?: string;
     website?: string;
   };
+  isFounder?: boolean;
+  joinedDate?: string;
+  featuredArticleIds?: string[];
 }
 
 export interface SystemSettings {
@@ -135,4 +140,23 @@ export interface PeerAnnotation {
   likes: number;          // Scholarly upvotes/endorsements
   replies: PeerReply[];   // Nested replies
 }
+
+export interface SavedArticle {
+  id: string; // `${readerId}_${articleId}`
+  readerId: string;
+  articleId: string;
+  title: string;
+  subtitle?: string;
+  category: string;
+  authorName: string;
+  readTime: string;
+  excerpt: string;
+  featuredImage?: string;
+  savedAt: number;
+  isRead: boolean;
+  personalNote?: string;
+  pdfLink?: string;
+  slug?: string;
+}
+
 
