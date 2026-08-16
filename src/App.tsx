@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Fuse from 'fuse.js';
-import { db, auth, seedInitialDataIfEmpty } from './firebase';
+import { db, auth, seedInitialDataIfEmpty, fetchArticlePreviews, fetchFullArticle } from './firebase';
 import { INITIAL_SEED_ARTICLES } from './data/initialSeed';
 import { 
   collection, 
@@ -41,6 +41,8 @@ import {
   updateArticleNote 
 } from './utils/savedArticles';
 import { motion, AnimatePresence } from 'motion/react';
+import { getOptimizedImageUrl } from './utils/imageOptimizer';
+import { getCachedArticles, setCachedArticles } from './utils/articleCache';
 
 
 import { 
@@ -95,20 +97,7 @@ export default function App() {
   const theme = 'dark';
 
   // Firebase Datastore States with Instant Local Storage Cache (0ms load time)
-  const [articles, setArticles] = useState<Article[]>(() => {
-    try {
-      const cached = localStorage.getItem('tol_cached_articles');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.error('Failed to parse cached articles:', e);
-    }
-    return INITIAL_SEED_ARTICLES;
-  });
+  const [articles, setArticles] = useState<Article[]>(() => getCachedArticles());
   const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
   const [isArticleViewLoading, setIsArticleViewLoading] = useState<boolean>(false);
   const [readingItems, setReadingItems] = useState<ReadingItem[]>([]);
@@ -135,6 +124,31 @@ export default function App() {
 
   // Toast Notification State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Network Connectivity State for Graceful Offline Fallbacks
+  const [isOnline, setIsOnline] = useState<boolean>(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setToastMessage('Network restored. Reconnected to live archives.');
+      setTimeout(() => setToastMessage(null), 3500);
+      loadData();
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      setToastMessage('Network unavailable. Switched to offline local cache mode.');
+      setTimeout(() => setToastMessage(null), 4000);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Helper to copy direct deep link URL
   const handleCopyLink = async (art: Article) => {
@@ -243,33 +257,17 @@ export default function App() {
 
   const loadData = async () => {
     try {
-      const articlesCol = collection(db, 'articles');
       const readingCol = collection(db, 'reading');
       const contributorsCol = collection(db, 'contributors');
 
-      // Fetch collections in parallel
-      const [articlesSnapshot, readingSnapshot, contributorsSnapshot] = await Promise.all([
-        getDocs(articlesCol),
+      // Fetch lightweight preview feed and auxiliary collections in parallel
+      const [previewsResult, readingSnapshot, contributorsSnapshot] = await Promise.all([
+        fetchArticlePreviews({ status: 'all', sortBy: 'createdAt', limitCount: 60 }),
         getDocs(readingCol),
         getDocs(contributorsCol)
       ]);
 
-      let articlesList = articlesSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      } as Article));
-
-      // Lazy seeding: only execute if the database is actually empty
-      if (articlesSnapshot.empty) {
-        console.log('Database empty. Seeding initial data...');
-        await seedInitialDataIfEmpty();
-        // Re-fetch after seeding
-        const freshSnapshot = await getDocs(articlesCol);
-        articlesList = freshSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        } as Article));
-      }
+      const articlesList = previewsResult.articles;
 
       // Sort: pinned first, then newest
       const sortedArticles = articlesList.sort((a, b) => {
@@ -281,12 +279,8 @@ export default function App() {
       setArticles(sortedArticles);
       setIsInitialLoading(false);
 
-      // Persist to local cache for 0ms instant load on subsequent visits
-      try {
-        localStorage.setItem('tol_cached_articles', JSON.stringify(sortedArticles));
-      } catch (e) {
-        console.error('Failed to write articles to local cache:', e);
-      }
+      // Persist to local cache with timestamp & TTL validation for 0ms instant load on subsequent visits
+      setCachedArticles(sortedArticles);
 
       const readingList = readingSnapshot.docs.map(doc => ({
         id: doc.id,
@@ -306,7 +300,6 @@ export default function App() {
       setSavedArticles(userSavedList);
 
       // Direct Deep-Linking URL query parameter or path-based support on initial load
-
       const params = new URLSearchParams(window.location.search);
       let urlArticleId = params.get('article') || params.get('art') || params.get('p');
       
@@ -345,6 +338,18 @@ export default function App() {
         if (sharedArticle) {
           setSelectedArticle(sharedArticle);
           setActiveTab('article-view');
+          setIsArticleViewLoading(true);
+
+          // Lazy load full content payload on deep-link arrival
+          fetchFullArticle(sharedArticle.id || sharedArticle.slug).then(full => {
+            if (full) {
+              setSelectedArticle(full);
+              setArticles(prev => prev.map(a => a.id === full.id ? { ...a, ...full } : a));
+            }
+            setIsArticleViewLoading(false);
+          }).catch(() => {
+            setIsArticleViewLoading(false);
+          });
           
           // Increment views for deep-linked loading
           try {
@@ -371,7 +376,7 @@ export default function App() {
 
   // Immediate deep-link resolution from instant local cache/seed
   useEffect(() => {
-    if (selectedArticle) return;
+    if (selectedArticle && selectedArticle.content && selectedArticle.content.length > 50) return;
     const params = new URLSearchParams(window.location.search);
     let urlArticleId = params.get('article') || params.get('art') || params.get('p');
     if (!urlArticleId) {
@@ -396,6 +401,17 @@ export default function App() {
       if (matched) {
         setSelectedArticle(matched);
         setActiveTab('article-view');
+        if (!matched.content || matched.content.length < 50) {
+          setIsArticleViewLoading(true);
+          fetchFullArticle(matched.id || matched.slug).then(full => {
+            if (full) {
+              setSelectedArticle(full);
+            }
+            setIsArticleViewLoading(false);
+          }).catch(() => {
+            setIsArticleViewLoading(false);
+          });
+        }
       }
     }
   }, [articles]);
@@ -511,10 +527,6 @@ export default function App() {
     setActiveTab('article-view');
     window.scrollTo({ top: 0, behavior: 'instant' });
 
-    setTimeout(() => {
-      setIsArticleViewLoading(false);
-    }, 120);
-
     // Synchronize URL with active article for direct deep-linking support using pretty paths
     const slugify = (text: string) => {
       return text
@@ -527,6 +539,17 @@ export default function App() {
     window.history.pushState({ path: newUrl }, '', newUrl);
 
     try {
+      // If full content is not loaded in memory, fetch it on demand from Firestore
+      let fullArticleObj = art;
+      if (!art.content || art.content.length < 50 || !art.sources || art.sources.length === 0) {
+        const fetchedFull = await fetchFullArticle(art.id || art.slug);
+        if (fetchedFull) {
+          fullArticleObj = fetchedFull;
+          setSelectedArticle(fetchedFull);
+          setArticles(prev => prev.map(a => a.id === fetchedFull.id ? { ...a, ...fetchedFull } : a));
+        }
+      }
+
       const artRef = doc(db, 'articles', art.id);
       await updateDoc(artRef, {
         views: increment(1)
@@ -534,9 +557,11 @@ export default function App() {
       // Update local state views counter immediately
       setArticles(prev => prev.map(a => a.id === art.id ? { ...a, views: (a.views || 0) + 1 } : a));
       // Log analytics view event
-      logViewEntry(art);
+      logViewEntry(fullArticleObj);
     } catch (e) {
-      console.error("Failed to increment views:", e);
+      console.error("Failed to increment views or fetch full article:", e);
+    } finally {
+      setIsArticleViewLoading(false);
     }
   };
 
@@ -678,40 +703,52 @@ export default function App() {
     );
   };
 
-  // Filter calculations using Fuse.js for high-performance fuzzy searching
-  const filteredArticles = useMemo(() => {
-    // 1. Get base articles (skip drafts for public view)
-    let list = articles.filter(art => art.status !== 'draft');
+  // 1. Memoized list of published articles
+  const publishedArticles = useMemo(() => {
+    return articles.filter(art => art.status !== 'draft');
+  }, [articles]);
 
-    // 2. Apply Category filter
+  // 2. Pre-indexed Fuse.js instance memoized against published articles
+  // Prevents rebuilding the inverted index on every search input keystroke
+  const searchIndex = useMemo(() => {
+    return new Fuse(publishedArticles, {
+      keys: [
+        { name: 'title', weight: 0.45 },
+        { name: 'subtitle', weight: 0.25 },
+        { name: 'excerpt', weight: 0.2 },
+        { name: 'tags', weight: 0.3 },
+        { name: 'category', weight: 0.2 },
+        { name: 'authorName', weight: 0.15 }
+      ],
+      threshold: 0.45,
+      ignoreLocation: true,
+      minMatchCharLength: 2
+    });
+  }, [publishedArticles]);
+
+  // 3. Fast filter calculations utilizing the memoized search index
+  const filteredArticles = useMemo(() => {
+    const query = searchQuery.trim();
+    let list = publishedArticles;
+
+    // Apply memoized fuzzy search if query is entered
+    if (query) {
+      list = searchIndex.search(query).map(result => result.item);
+    }
+
+    // Apply Category filter
     if (categoryFilter !== 'all') {
       if (categoryFilter === 'criminology' || categoryFilter === 'psyche' || categoryFilter === 'politics') {
         list = list.filter(art => art.category === categoryFilter);
       } else if (categoryFilter === 'case-studies') {
         list = list.filter(art => (art.tags || []).some(t => t.toLowerCase().includes('case study')));
       } else if (categoryFilter === 'research-notes') {
-        list = list.filter(art => (art.tags || []).some(t => t.toLowerCase().includes('research note')) || art.readTime.includes('3 min') || art.readTime.includes('4 min'));
+        list = list.filter(art => (art.tags || []).some(t => t.toLowerCase().includes('research note')) || (art.readTime && (art.readTime.includes('3 min') || art.readTime.includes('4 min'))));
       }
     }
 
-    // 3. Apply Fuzzy Search if searchQuery exists
-    if (searchQuery.trim()) {
-      const fuse = new Fuse(list, {
-        keys: [
-          { name: 'title', weight: 0.5 },
-          { name: 'subtitle', weight: 0.3 },
-          { name: 'excerpt', weight: 0.2 },
-          { name: 'tags', weight: 0.3 },
-          { name: 'content', weight: 0.15 }
-        ],
-        threshold: 0.5,
-        ignoreLocation: true
-      });
-      return fuse.search(searchQuery).map(result => result.item);
-    }
-
     return list;
-  }, [articles, categoryFilter, searchQuery]);
+  }, [publishedArticles, searchIndex, categoryFilter, searchQuery]);
 
   // Extract all unique tags across published articles to enable cross-document tracing
   const allUniqueTags = useMemo(() => {
@@ -834,6 +871,14 @@ export default function App() {
           onSearch={handleSearch}
           savedCount={savedArticles.length}
         />
+      )}
+
+      {/* Offline Mode Graceful Fallback Banner */}
+      {!isOnline && (
+        <div className="bg-amber-950/60 border-b border-amber-800/40 px-4 py-2 text-center text-xs font-sans text-amber-200/90 flex items-center justify-center gap-2 sticky top-0 z-50 backdrop-blur-sm">
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+          <span>Offline Archival Mode Active — Full research library and bookmarked papers remain available from instant local storage.</span>
+        </div>
       )}
 
 
@@ -1367,11 +1412,12 @@ export default function App() {
               {selectedArticle.featuredImage && !selectedArticle.canvaEmbed && (
                 <div className="w-full h-[220px] md:h-[400px] overflow-hidden rounded-sm border border-paper/10 mb-2 relative">
                   <img 
-                    src={selectedArticle.featuredImage} 
+                    src={getOptimizedImageUrl(selectedArticle.featuredImage, 'banner')} 
                     alt={selectedArticle.title} 
                     className="w-full h-full object-cover select-none"
                     referrerPolicy="no-referrer"
                     loading="lazy"
+                    decoding="async"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-midnight/40 to-transparent" />
                 </div>
@@ -1585,56 +1631,72 @@ export default function App() {
                           handleArticleClick(relArt);
                           window.scrollTo({ top: 0, behavior: 'smooth' });
                         }}
-                        className="group border border-paper/10 hover:border-blood/60 p-4 rounded-sm bg-navy/40 hover:bg-navy/80 cursor-pointer transition-all flex flex-col justify-between shadow-sm"
+                        className="group border border-paper/10 hover:border-blood/60 rounded-sm bg-navy/40 hover:bg-navy/80 cursor-pointer transition-all flex flex-col justify-between shadow-sm overflow-hidden"
                       >
-                        <div className="space-y-2.5">
-                          <div className="flex justify-between items-center gap-2">
-                            <span className="font-sans text-[8px] font-bold uppercase tracking-wider text-paper/40">
-                              {relArt.category} · {relArt.readTime || '5 min read'}
-                            </span>
-                            <span className="font-mono text-[8px] bg-blood/20 border border-blood/40 text-amber-300 font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm">
-                              Match score: {score}
-                            </span>
+                        {relArt.featuredImage && (
+                          <div className="w-full h-28 overflow-hidden relative bg-ink/60 border-b border-paper/10">
+                            <img 
+                              src={getOptimizedImageUrl(relArt.featuredImage, 'thumbnail')}
+                              alt={relArt.title}
+                              loading="lazy"
+                              decoding="async"
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover opacity-75 group-hover:opacity-100 group-hover:scale-105 transition-all duration-300"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-navy/90 via-transparent to-transparent" />
                           </div>
-                          
-                          <h4 className="font-display text-sm font-bold text-paper/90 group-hover:text-blood transition-colors line-clamp-2 leading-snug">
-                            {relArt.title}
-                          </h4>
-                          
-                          <p className="font-serif text-[11px] text-paper/50 line-clamp-2 leading-relaxed">
-                            {relArt.excerpt || relArt.subtitle}
-                          </p>
-                        </div>
+                        )}
 
-                        <div className="mt-4 pt-3 border-t border-paper/10 space-y-2">
-                          {/* Reason indicators: Author and Series badges */}
-                          <div className="flex flex-wrap gap-1.5 items-center">
-                            {isSameAuthor && (
-                              <span className="font-sans text-[8px] font-semibold bg-paper/10 border border-paper/20 text-paper/80 px-1.5 py-0.5 rounded-sm flex items-center gap-1">
-                                ✍️ {authorMatchName ? `Author: ${authorMatchName}` : 'Same Author'}
+                        <div className="p-4 space-y-2.5 flex-1 flex flex-col justify-between">
+                          <div>
+                            <div className="flex justify-between items-center gap-2 mb-2">
+                              <span className="font-sans text-[8px] font-bold uppercase tracking-wider text-paper/40">
+                                {relArt.category} · {relArt.readTime || '5 min read'}
                               </span>
-                            )}
-                            {isSameSeries && (
-                              <span className="font-sans text-[8px] font-semibold bg-blood/20 border border-blood/40 text-red-300 px-1.5 py-0.5 rounded-sm">
-                                📚 Series Companion
+                              <span className="font-mono text-[8px] bg-blood/20 border border-blood/40 text-amber-300 font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm">
+                                Match score: {score}
                               </span>
-                            )}
-                          </div>
-
-                          {/* Shared Tags */}
-                          {sharedTags.length > 0 && (
-                            <div className="flex flex-wrap gap-1 items-center">
-                              <span className="font-sans text-[8px] text-blood uppercase tracking-wider font-semibold">Shared Themes:</span>
-                              {sharedTags.slice(0, 3).map(tag => (
-                                <span key={tag} className="font-mono text-[9px] text-paper/50 bg-paper/5 px-1 py-0.2 rounded-xs">
-                                  #{tag}
-                                </span>
-                              ))}
                             </div>
-                          )}
+                            
+                            <h4 className="font-display text-sm font-bold text-paper/90 group-hover:text-blood transition-colors line-clamp-2 leading-snug">
+                              {relArt.title}
+                            </h4>
+                            
+                            <p className="font-serif text-[11px] text-paper/50 line-clamp-2 leading-relaxed mt-1">
+                              {relArt.excerpt || relArt.subtitle}
+                            </p>
+                          </div>
 
-                          <div className="pt-1 text-right font-sans text-[8px] font-bold uppercase tracking-wider text-paper/30 group-hover:text-blood transition-colors">
-                            Trace Investigation Overlap →
+                          <div className="mt-4 pt-3 border-t border-paper/10 space-y-2">
+                            {/* Reason indicators: Author and Series badges */}
+                            <div className="flex flex-wrap gap-1.5 items-center">
+                              {isSameAuthor && (
+                                <span className="font-sans text-[8px] font-semibold bg-paper/10 border border-paper/20 text-paper/80 px-1.5 py-0.5 rounded-sm flex items-center gap-1">
+                                  ✍️ {authorMatchName ? `Author: ${authorMatchName}` : 'Same Author'}
+                                </span>
+                              )}
+                              {isSameSeries && (
+                                <span className="font-sans text-[8px] font-semibold bg-blood/20 border border-blood/40 text-red-300 px-1.5 py-0.5 rounded-sm">
+                                  📚 Series Companion
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Shared Tags */}
+                            {sharedTags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 items-center">
+                                <span className="font-sans text-[8px] text-blood uppercase tracking-wider font-semibold">Shared Themes:</span>
+                                {sharedTags.slice(0, 3).map(tag => (
+                                  <span key={tag} className="font-mono text-[9px] text-paper/50 bg-paper/5 px-1 py-0.2 rounded-xs">
+                                    #{tag}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="pt-1 text-right font-sans text-[8px] font-bold uppercase tracking-wider text-paper/30 group-hover:text-blood transition-colors">
+                              Trace Investigation Overlap →
+                            </div>
                           </div>
                         </div>
                       </div>

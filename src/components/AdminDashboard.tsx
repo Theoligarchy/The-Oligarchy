@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, auth } from '../firebase';
+import { db, auth, fetchFullArticle } from '../firebase';
 import { 
   collection, 
   getDocs, 
@@ -792,7 +792,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setAiMetadataReasoning(null);
   };
 
-  const handleEditArticle = (art: Article) => {
+  const handleEditArticle = async (art: Article) => {
     setEditingId(art.id);
     setTitle(art.title);
     setSubtitle(art.subtitle || '');
@@ -815,6 +815,19 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setSources(art.sources || []);
     setSelectedVersionIndex(null);
     setActiveTab('write');
+
+    // If full content is not in summary payload, fetch full manuscript on demand
+    if (!art.content || art.content.length < 50 || !art.sources || art.sources.length === 0) {
+      try {
+        const full = await fetchFullArticle(art.id);
+        if (full) {
+          if (full.content) setContent(full.content);
+          if (full.sources) setSources(full.sources);
+        }
+      } catch (err) {
+        console.error("Failed to fetch full article body for editing:", err);
+      }
+    }
   };
 
   const handleDeleteArticle = async (id: string) => {
@@ -830,9 +843,15 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
   const handleDuplicateArticle = async (art: Article) => {
     try {
+      let fullArticleData = art;
+      if (!art.content || art.content.length < 50) {
+        const full = await fetchFullArticle(art.id);
+        if (full) fullArticleData = full;
+      }
+
       const dupId = `art-dup-${Date.now().toString(36)}`;
       const duplicated: Article = {
-        ...art,
+        ...fullArticleData,
         id: dupId,
         title: `${art.title} (Duplicated)`,
         slug: `${art.slug}-copy`,

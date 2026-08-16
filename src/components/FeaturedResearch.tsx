@@ -3,6 +3,7 @@ import { Article } from '../types';
 import { Eye, Clock, Download, FileText, ArrowRight } from 'lucide-react';
 import ShareMenu from './ShareMenu';
 import BookmarkButton from './BookmarkButton';
+import { getOptimizedImageUrl } from '../utils/imageOptimizer';
 
 interface FeaturedResearchProps {
   article: Article;
@@ -26,11 +27,12 @@ export default function FeaturedResearch({
       <div className="md:col-span-5 min-h-[250px] md:min-h-[380px] relative overflow-hidden bg-ink flex flex-col justify-end p-6 md:p-8">
         {article.featuredImage ? (
           <img 
-            src={article.featuredImage} 
+            src={getOptimizedImageUrl(article.featuredImage, 'banner')} 
             alt={article.title}
             className="absolute inset-0 w-full h-full object-cover opacity-35 group-hover:scale-[1.03] transition-transform duration-700 ease-out"
             referrerPolicy="no-referrer"
             loading="lazy"
+            decoding="async"
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-blood/30 to-ink opacity-65" />

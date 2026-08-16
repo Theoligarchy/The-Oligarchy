@@ -1,0 +1,125 @@
+{
+  "entities": {
+    "Article": {
+      "title": "Article",
+      "description": "Scholarly research paper or analytical essay published on The Oligarchy.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique article document ID" },
+        "title": { "type": "string", "description": "Primary publication title" },
+        "subtitle": { "type": "string", "description": "Secondary thesis subtitle" },
+        "slug": { "type": "string", "description": "URL-safe permalink identifier" },
+        "category": { "type": "string", "enum": ["criminology", "psyche", "politics"], "description": "Primary academic domain" },
+        "tags": { "type": "array", "description": "Descriptive research taxonomy tags" },
+        "featuredImage": { "type": "string", "description": "Header cover image URL" },
+        "canvaEmbed": { "type": "string", "description": "Interactive visual or slide deck embed" },
+        "pdfLink": { "type": "string", "description": "Direct download link for research PDF report" },
+        "authorId": { "type": "string", "description": "Author identifier" },
+        "authorName": { "type": "string", "description": "Author display name" },
+        "readTime": { "type": "string", "description": "Calculated reading duration" },
+        "excerpt": { "type": "string", "description": "Abstract and synopsis of the paper" },
+        "content": { "type": "string", "description": "Complete HTML manuscript body content" },
+        "status": { "type": "string", "enum": ["draft", "published", "scheduled", "archived"], "description": "Publishing lifecycle status" },
+        "publishDate": { "type": "string", "description": "Publication date string" },
+        "scheduledAt": { "type": "number", "description": "Scheduled release timestamp" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in epoch ms" },
+        "updatedAt": { "type": "number", "description": "Last updated timestamp in epoch ms" },
+        "views": { "type": "number", "description": "Total reader views count" },
+        "isFeatured": { "type": "boolean", "description": "Featured research spotlight flag" },
+        "isPinned": { "type": "boolean", "description": "Pinned editorial banner flag" },
+        "seriesName": { "type": "string", "description": "Multi-part research series name" },
+        "seriesPart": { "type": "number", "description": "Index number in the series" },
+        "sources": { "type": "array", "description": "Peer citations and academic bibliography entries" }
+      },
+      "required": ["id", "title", "slug", "category", "authorId", "authorName", "excerpt", "status", "createdAt", "updatedAt"]
+    },
+    "ReadingItem": {
+      "title": "ReadingItem",
+      "description": "Scholarly monograph or reference text in the reading stack.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique book document ID" },
+        "title": { "type": "string", "description": "Book or treatise title" },
+        "author": { "type": "string", "description": "Author or editor name" },
+        "link": { "type": "string", "description": "External reference link" },
+        "addedAt": { "type": "number", "description": "Timestamp added" }
+      },
+      "required": ["id", "title", "author", "addedAt"]
+    },
+    "AuthorProfile": {
+      "title": "AuthorProfile",
+      "description": "Contributor biography and scholarly credentials.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Author ID" },
+        "name": { "type": "string", "description": "Full author name" },
+        "role": { "type": "string", "description": "Editorial or academic title" },
+        "bio": { "type": "string", "description": "Biographical summary" }
+      },
+      "required": ["id", "name", "role", "bio"]
+    },
+    "NewsletterSubscriber": {
+      "title": "NewsletterSubscriber",
+      "description": "Reader email subscription record.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "description": "Subscriber email address" },
+        "subscribedAt": { "type": "number", "description": "Subscription timestamp" }
+      },
+      "required": ["email", "subscribedAt"]
+    },
+    "PeerAnnotation": {
+      "title": "PeerAnnotation",
+      "description": "Marginalia, scholarly review, or discourse annotation on an article.",
+      "type": "object",
+      "properties": {
+        "articleId": { "type": "string", "description": "Associated article ID" },
+        "paragraphIndex": { "type": "number", "description": "Paragraph index for contextual marginalia" },
+        "authorName": { "type": "string", "description": "Reviewer name" },
+        "authorTitle": { "type": "string", "description": "Academic title or credentials" },
+        "content": { "type": "string", "description": "Review commentary text" },
+        "timestamp": { "type": "number", "description": "Annotation timestamp" },
+        "likes": { "type": "number", "description": "Peer endorsements count" }
+      },
+      "required": ["articleId", "authorName", "content", "timestamp"]
+    },
+    "ViewLog": {
+      "title": "ViewLog",
+      "description": "Analytics record for article readership.",
+      "type": "object",
+      "properties": {
+        "articleId": { "type": "string", "description": "Article ID" },
+        "articleTitle": { "type": "string", "description": "Article title" },
+        "category": { "type": "string", "description": "Article category" },
+        "timestamp": { "type": "number", "description": "View timestamp" }
+      },
+      "required": ["articleId", "articleTitle", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/articles/{articleId}": {
+      "schema": "Article",
+      "description": "Published and draft scholarly articles, monographs, and research analyses."
+    },
+    "/reading/{itemId}": {
+      "schema": "ReadingItem",
+      "description": "Curated reading stack books and references."
+    },
+    "/contributors/{contributorId}": {
+      "schema": "AuthorProfile",
+      "description": "Journal authors and editorial contributors."
+    },
+    "/subscribers/{subscriberId}": {
+      "schema": "NewsletterSubscriber",
+      "description": "Email dispatch subscribers list."
+    },
+    "/peer_reviews/{reviewId}": {
+      "schema": "PeerAnnotation",
+      "description": "Marginalia annotations and scholarly discourse comments."
+    },
+    "/views_log/{viewId}": {
+      "schema": "ViewLog",
+      "description": "Readership view telemetry events."
+    }
+  }
+}

@@ -201,8 +201,62 @@ async function startServer() {
 
   app.use(express.json({ limit: '10mb' }));
 
-  // API Route: Suggest Category and Tags using Gemini API
-  app.post('/api/suggest-metadata', async (req, res) => {
+  // In-Memory Sliding Window IP Rate Limiter for Gemini AI Endpoints
+  interface RateLimitRecord {
+    timestamps: number[];
+  }
+  const aiRateLimitMap = new Map<string, RateLimitRecord>();
+  const AI_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+  const AI_RATE_LIMIT_MAX_REQUESTS = 20; // max 20 calls per 10m per IP
+
+  const aiEndpointRateLimiter = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress) || '127.0.0.1';
+
+    const now = Date.now();
+    const cutoff = now - AI_RATE_LIMIT_WINDOW_MS;
+
+    let record = aiRateLimitMap.get(ip);
+    if (!record) {
+      record = { timestamps: [] };
+      aiRateLimitMap.set(ip, record);
+    }
+
+    // Filter timestamps within current sliding window
+    record.timestamps = record.timestamps.filter(t => t > cutoff);
+
+    const remaining = Math.max(0, AI_RATE_LIMIT_MAX_REQUESTS - record.timestamps.length);
+    const oldestTimestamp = record.timestamps.length > 0 ? record.timestamps[0] : now;
+    const resetTimeSeconds = Math.max(1, Math.ceil((oldestTimestamp + AI_RATE_LIMIT_WINDOW_MS - now) / 1000));
+
+    res.setHeader('X-RateLimit-Limit', AI_RATE_LIMIT_MAX_REQUESTS);
+    res.setHeader('X-RateLimit-Remaining', remaining);
+    res.setHeader('X-RateLimit-Reset', resetTimeSeconds);
+
+    if (record.timestamps.length >= AI_RATE_LIMIT_MAX_REQUESTS) {
+      res.setHeader('Retry-After', resetTimeSeconds);
+      return res.status(429).json({
+        error: `AI metadata rate limit reached (${AI_RATE_LIMIT_MAX_REQUESTS} requests per 10 minutes per IP). Please try again in ${resetTimeSeconds} seconds.`
+      });
+    }
+
+    record.timestamps.push(now);
+    next();
+  };
+
+  // Periodic cleanup of stale rate-limit IP records
+  setInterval(() => {
+    const cutoff = Date.now() - AI_RATE_LIMIT_WINDOW_MS;
+    for (const [ip, record] of aiRateLimitMap.entries()) {
+      record.timestamps = record.timestamps.filter(t => t > cutoff);
+      if (record.timestamps.length === 0) {
+        aiRateLimitMap.delete(ip);
+      }
+    }
+  }, 5 * 60 * 1000);
+
+  // API Route: Suggest Category and Tags using Gemini API with Rate Limiting Protection
+  app.post('/api/suggest-metadata', aiEndpointRateLimiter, async (req, res) => {
     try {
       const { title = '', subtitle = '', excerpt = '', content = '' } = req.body || {};
       
