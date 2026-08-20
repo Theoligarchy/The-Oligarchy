@@ -12,9 +12,17 @@ import {
   query 
 } from 'firebase/firestore';
 import { signOut, updatePassword } from 'firebase/auth';
-import { Article, ReadingItem, ResearchTip, ArticleVersion, PeerAnnotation } from '../types';
+import { Article, ReadingItem, ResearchTip, ArticleVersion, PeerAnnotation, ManuscriptSubmission, CoAuthor, EditorialRole, EditorialUser, AuthorProfile } from '../types';
 import QuillEditor from './QuillEditor';
 import AnalyticsDashboard from './AnalyticsDashboard';
+import ReviewQueuePipeline from './ReviewQueuePipeline';
+import EditorialTeamManager from './EditorialTeamManager';
+import AuthorManager from './AuthorManager';
+import DraftInternalNotes from './DraftInternalNotes';
+import ContributorDashboard from './ContributorDashboard';
+import SiteContentManager from './SiteContentManager';
+import { fetchContributors } from '../utils/contributors';
+import { rbac, ROLE_LABELS, resolveEditorialUser } from '../lib/rbac';
 import { 
   Plus, 
   FileEdit, 
@@ -40,7 +48,15 @@ import {
   FileSpreadsheet,
   FileUp,
   MessageSquare,
-  Shield
+  Shield,
+  GraduationCap,
+  Users,
+  ShieldCheck,
+  ShieldAlert,
+  ArrowRight,
+  UserCheck,
+  Search,
+  Globe
 } from 'lucide-react';
 
 // Helper to recursively scrub undefined values from object payloads before sending to Firestore
@@ -71,11 +87,28 @@ interface AdminDashboardProps {
   onLogout: () => void;
   allArticles: Article[];
   refreshArticles: () => Promise<void>;
+  user?: any;
 }
 
 export default function AdminDashboard({ onLogout, allArticles, refreshArticles }: AdminDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'write' | 'articles' | 'tips' | 'reading' | 'analytics' | 'settings' | 'subscribers' | 'discourse'>('write');
+  const [activeTab, setActiveTab] = useState<'write' | 'articles' | 'authors' | 'pitches' | 'tips' | 'reading' | 'analytics' | 'settings' | 'subscribers' | 'discourse' | 'team' | 'contributor_dashboard'>('write');
   
+  // Editorial RBAC & Persona Simulation States
+  const [currentUser, setCurrentUser] = useState<EditorialUser | null>(null);
+  const [simulatedRole, setSimulatedRole] = useState<EditorialRole | null>(() => {
+    return (localStorage.getItem('tol_simulated_role') as EditorialRole) || null;
+  });
+
+  const effectiveRole: EditorialRole = simulatedRole || currentUser?.role || 'admin';
+  const roleMeta = ROLE_LABELS[effectiveRole] || ROLE_LABELS.admin;
+
+  // Registered Contributors & Authors List
+  const [contributors, setContributors] = useState<AuthorProfile[]>([]);
+
+  // Submissions Pipeline & Manuscript Drafts
+  const [allSubmissions, setAllSubmissions] = useState<ManuscriptSubmission[]>([]);
+  const [notesArticleModal, setNotesArticleModal] = useState<Article | null>(null);
+
   // Write Form States
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
@@ -88,6 +121,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   const [canvaEmbed, setCanvaEmbed] = useState('');
   const [pdfLink, setPdfLink] = useState('');
   const [readTime, setReadTime] = useState('5 min read');
+  const [publishDate, setPublishDate] = useState('');
   const [excerpt, setExcerpt] = useState('');
   const [content, setContent] = useState('');
   const [status, setStatus] = useState<'draft' | 'published' | 'scheduled'>('draft');
@@ -97,8 +131,21 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   const [seriesPart, setSeriesPart] = useState<number | ''>('');
   const [authorId, setAuthorId] = useState('priyasha-priyal-jena');
   const [authorName, setAuthorName] = useState('Priyasha Priyal Jena');
+  const [authorOrcid, setAuthorOrcid] = useState('');
+  const [doi, setDoi] = useState('');
+  const [coAuthors, setCoAuthors] = useState<CoAuthor[]>([]);
+  const [newCoName, setNewCoName] = useState('');
+  const [newCoRole, setNewCoRole] = useState('');
+  const [newCoAffiliation, setNewCoAffiliation] = useState('');
+  const [newCoOrcid, setNewCoOrcid] = useState('');
+  const [newCoEmail, setNewCoEmail] = useState('');
   const [sources, setSources] = useState<Array<{ category: any; title: string; url?: string; citation?: string }>>([]);
   const [selectedVersionIndex, setSelectedVersionIndex] = useState<number | null>(null);
+
+  // Dedicated Search Engine Optimization (SEO) States
+  const [metaTitle, setMetaTitle] = useState('');
+  const [metaDescription, setMetaDescription] = useState('');
+  const [canonicalUrl, setCanonicalUrl] = useState('');
 
   // New Source Item Temp States
   const [newSrcCat, setNewSrcCat] = useState<'academic' | 'government' | 'book' | 'court' | 'database' | 'investigative'>('academic');
@@ -148,6 +195,9 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   const [allReviews, setAllReviews] = useState<PeerAnnotation[]>([]);
   const [unverifiedReviewsCount, setUnverifiedReviewsCount] = useState(0);
 
+  // Review Queue / Manuscript Pitches Triage Counter
+  const [pendingPitchesCount, setPendingPitchesCount] = useState(0);
+
   // Sandbox-compatible custom deletion confirmation states
   const [deleteConfirmReviewId, setDeleteConfirmReviewId] = useState<string | null>(null);
   const [deleteConfirmReplyId, setDeleteConfirmReplyId] = useState<{ reviewId: string; replyId: string } | null>(null);
@@ -155,11 +205,28 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   const [deleteConfirmArticleId, setDeleteConfirmArticleId] = useState<string | null>(null);
 
   useEffect(() => {
-    // Load Tips, Subscribers, and Reading Stack
+    // Resolve current editorial user and role
+    const initRole = async () => {
+      const authUser = auth.currentUser || { email: 'theoligarchy.ppj@gmail.com', uid: 'founder-priyasha' };
+      const resolved = await resolveEditorialUser(authUser);
+      setCurrentUser(resolved);
+      
+      // Prefill author fields if author
+      if (resolved.role === 'author') {
+        setAuthorName(resolved.displayName || 'Scholar Contributor');
+        setAuthorId(resolved.authorId || 'scholar-contributor');
+        if (resolved.orcid) setAuthorOrcid(resolved.orcid);
+      }
+    };
+    initRole();
+
+    // Load Tips, Subscribers, Reading Stack, Reviews, Pitches, and Contributors
     loadTips();
     loadSubscribers();
     loadReadingStack();
     loadReviews();
+    loadPitchesCount();
+    loadContributorsList();
 
     // Auto-save loop: triggers every 15 seconds if content changes
     const autoSaveInterval = setInterval(() => {
@@ -182,6 +249,28 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
     return () => clearInterval(autoSaveInterval);
   }, [content, title]);
+
+  const handleSwitchSimulatedRole = (newRole: EditorialRole | null) => {
+    if (newRole) {
+      localStorage.setItem('tol_simulated_role', newRole);
+    } else {
+      localStorage.removeItem('tol_simulated_role');
+    }
+    setSimulatedRole(newRole);
+
+    // If active tab is now unauthorized, navigate to appropriate home tab
+    if (newRole === 'author') {
+      if (['tips', 'reading', 'subscribers', 'analytics', 'settings', 'team', 'discourse'].includes(activeTab)) {
+        setActiveTab('contributor_dashboard');
+      }
+    } else if (newRole === 'reviewer' && ['tips', 'subscribers', 'settings', 'team', 'contributor_dashboard'].includes(activeTab)) {
+      setActiveTab('pitches');
+    }
+    setAlert({ 
+      text: newRole ? `Previewing interface as ${ROLE_LABELS[newRole].title}. Access permissions updated.` : 'Restored default editorial permissions.', 
+      type: 'success' 
+    });
+  };
 
   const loadTips = async () => {
     try {
@@ -218,6 +307,91 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     } catch (e) {
       console.error("Error loading reviews for admin moderation:", e);
     }
+  };
+
+  const loadContributorsList = async () => {
+    try {
+      const list = await fetchContributors();
+      setContributors(list);
+    } catch (e) {
+      console.error("Error fetching contributors list in admin:", e);
+    }
+  };
+
+  const loadPitchesCount = async () => {
+    try {
+      let count = 0;
+      let submissionsList: ManuscriptSubmission[] = [];
+      try {
+        const col = collection(db, 'submissions');
+        const snap = await getDocs(col);
+        submissionsList = snap.docs.map(d => ({ id: d.id, ...d.data() } as ManuscriptSubmission));
+        count = snap.docs.filter(d => d.data().status === 'received' || d.data().status === 'in_peer_review').length;
+      } catch (err) {}
+
+      try {
+        const localSubs = JSON.parse(localStorage.getItem('tol_local_submissions') || '[]');
+        if (localSubs.length > 0) {
+          if (submissionsList.length === 0) {
+            submissionsList = localSubs;
+          }
+          if (count === 0) {
+            count = localSubs.filter((s: any) => s.status === 'received' || s.status === 'in_peer_review').length;
+          }
+        }
+      } catch (e) {}
+
+      setAllSubmissions(submissionsList);
+      setPendingPitchesCount(count);
+    } catch (e) {
+      console.error("Error loading pitches count:", e);
+    }
+  };
+
+  const handleConvertPitchToArticle = (submission: ManuscriptSubmission) => {
+    setEditingId(null);
+    setTitle(submission.title);
+    setSubtitle(submission.subtitle || '');
+    setSlug(generateAutoSlug(submission.title));
+    setCategory(submission.category);
+    setExcerpt(submission.abstract);
+    setContent(submission.content);
+    setAuthorName(submission.authorName);
+    setAuthorId(submission.authorName.toLowerCase().replace(/[^a-z0-9]/g, '-'));
+    setTags([submission.category, submission.submissionType.replace('_', ' ')]);
+    setStatus('draft');
+    setIsFeatured(false);
+    setIsPinned(false);
+    setMetaTitle(submission.title);
+    setMetaDescription(submission.abstract || '');
+    setCanonicalUrl('');
+    
+    // Parse sourcesText into sources list if present
+    if (submission.sourcesText) {
+      const parsedSources: Array<{ category: any; title: string; url?: string; citation?: string }> = [];
+      const lines = submission.sourcesText.split('\n').map(l => l.trim()).filter(Boolean);
+      lines.forEach(line => {
+        parsedSources.push({
+          category: 'academic',
+          title: line.replace(/^[\d\.\-\*]+\s*/, ''),
+          citation: 'Submitted with Investigation'
+        });
+      });
+      if (submission.datasetUrl) {
+        parsedSources.push({
+          category: 'database',
+          title: 'Primary Investigation Dataset',
+          url: submission.datasetUrl
+        });
+      }
+      setSources(parsedSources);
+    }
+
+    setAlert({
+      text: `Investigation manuscript "${submission.title}" converted into post editor draft! Review and publish when ready.`,
+      type: 'success'
+    });
+    setActiveTab('write');
   };
 
   const handleToggleVerifyReview = async (reviewId: string, currentStatus: boolean) => {
@@ -640,6 +814,28 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setSources(sources.filter((_, i) => i !== index));
   };
 
+  // Co-Author management helpers
+  const addCoAuthorItem = () => {
+    if (!newCoName.trim()) return;
+    const newCo: CoAuthor = {
+      name: newCoName.trim(),
+      role: newCoRole.trim() || undefined,
+      institution: newCoAffiliation.trim() || undefined,
+      orcid: newCoOrcid.trim() || undefined,
+      email: newCoEmail.trim() || undefined
+    };
+    setCoAuthors([...coAuthors, newCo]);
+    setNewCoName('');
+    setNewCoRole('');
+    setNewCoAffiliation('');
+    setNewCoOrcid('');
+    setNewCoEmail('');
+  };
+
+  const removeCoAuthorItem = (index: number) => {
+    setCoAuthors(coAuthors.filter((_, i) => i !== index));
+  };
+
   // Auto save draft locally for crash recovery
   const triggerAutoSave = () => {
     if (!content || content === lastSavedContent.current || content === '<p><br></p>') return;
@@ -652,6 +848,9 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
       category,
       tags,
       slug,
+      metaTitle,
+      metaDescription,
+      canonicalUrl,
       savedAt: Date.now()
     };
     localStorage.setItem('tol_autosave_recovery', JSON.stringify(draftData));
@@ -672,6 +871,9 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
         setCategory(parsed.category || 'criminology');
         setTags(parsed.tags || []);
         setSlug(parsed.slug || '');
+        setMetaTitle(parsed.metaTitle || '');
+        setMetaDescription(parsed.metaDescription || '');
+        setCanonicalUrl(parsed.canonicalUrl || '');
         
         localStorage.removeItem('tol_autosave_recovery');
         setAlert({ text: 'Crash draft restored successfully.', type: 'success' });
@@ -688,7 +890,10 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
       return;
     }
 
-    const currentStatus = forcedStatus || status;
+    const isAuthorOnly = effectiveRole === 'author';
+    const currentStatus = isAuthorOnly ? 'draft' : (forcedStatus || status);
+    const finalIsFeatured = isAuthorOnly ? false : isFeatured;
+    const finalIsPinned = isAuthorOnly ? false : isPinned;
 
     // Smart calculated read-time estimation
     const words = content.replace(/<[^>]+>/g, '').split(/\s+/).length;
@@ -709,7 +914,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
         title: existingArt.title,
         excerpt: existingArt.excerpt,
         content: existingArt.content,
-        updatedBy: auth.currentUser?.email || 'admin'
+        updatedBy: auth.currentUser?.email || currentUser?.email || 'admin'
       };
       updatedVersions = [newVersion, ...updatedVersions].slice(0, 10); // Keep last 10 versions
     }
@@ -724,31 +929,39 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
       featuredImage: featuredImage.trim() || undefined,
       canvaEmbed: canvaEmbed.trim() || undefined,
       pdfLink: pdfLink.trim() || undefined,
-      authorId: authorId.trim() || 'priyasha-priyal-jena',
-      authorName: authorName.trim() || 'Priyasha Priyal Jena',
+      authorId: authorId.trim() || currentUser?.authorId || 'scholar-contributor',
+      authorName: authorName.trim() || currentUser?.displayName || 'Scholar Contributor',
+      authorOrcid: authorOrcid.trim() || currentUser?.orcid || undefined,
+      createdByUid: existingArt?.createdByUid || currentUser?.uid || auth.currentUser?.uid,
+      createdByEmail: existingArt?.createdByEmail || currentUser?.email || auth.currentUser?.email || undefined,
+      doi: doi.trim() || undefined,
+      coAuthors: coAuthors.length > 0 ? coAuthors : undefined,
       readTime: computedReadTime,
       excerpt: excerpt.trim() || title.trim(),
       content: content,
       status: currentStatus,
-      publishDate: currentStatus === 'published' ? new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : undefined,
+      publishDate: currentStatus === 'published' ? (publishDate.trim() || existingArt?.publishDate || new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })) : undefined,
       createdAt: existingArt?.createdAt || Date.now(),
       updatedAt: Date.now(),
       views: existingArt?.views || 0,
-      isFeatured,
-      isPinned,
+      isFeatured: finalIsFeatured,
+      isPinned: finalIsPinned,
       sources,
       seriesName: seriesName.trim() || undefined,
       seriesPart: typeof seriesPart === 'number' ? seriesPart : undefined,
       versions: updatedVersions,
-      seoTitle: title.trim(),
-      seoDescription: excerpt.trim() || undefined
+      metaTitle: metaTitle.trim() || undefined,
+      metaDescription: metaDescription.trim() || undefined,
+      seoTitle: metaTitle.trim() || title.trim(),
+      seoDescription: metaDescription.trim() || excerpt.trim() || undefined,
+      canonicalUrl: canonicalUrl.trim() || undefined
     };
 
     try {
       await setDoc(doc(db, 'articles', finalId), cleanUndefined(articleData));
       
       // If marked as featured, toggle all other featured pins off
-      if (isFeatured) {
+      if (finalIsFeatured) {
         for (const art of allArticles) {
           if (art.id !== finalId && art.isFeatured) {
             await updateDoc(doc(db, 'articles', art.id), { isFeatured: false });
@@ -756,7 +969,26 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
         }
       }
 
-      setAlert({ text: `Article saved successfully as ${currentStatus.toUpperCase()}.`, type: 'success' });
+      // If submitted for peer review by author, also ensure a submission entry exists in submissions collection
+      if (isAuthorOnly && forcedStatus === 'published') {
+        const subCol = collection(db, 'submissions');
+        await addDoc(subCol, {
+          title: title.trim(),
+          category,
+          authorName: authorName.trim() || currentUser?.displayName || 'Scholar Contributor',
+          authorEmail: currentUser?.email || auth.currentUser?.email || '',
+          affiliation: currentUser?.institution || '',
+          orcid: authorOrcid.trim() || currentUser?.orcid || '',
+          abstract: excerpt.trim() || title.trim(),
+          submittedAt: Date.now(),
+          status: 'under_review',
+          articleId: finalId
+        });
+        setAlert({ text: `Manuscript "${title}" submitted to the Peer Review Queue for editorial evaluation.`, type: 'success' });
+      } else {
+        setAlert({ text: `Manuscript saved successfully as ${currentStatus.toUpperCase()}.`, type: 'success' });
+      }
+
       clearWriteForm();
       await refreshArticles();
       localStorage.removeItem('tol_autosave_recovery');
@@ -778,6 +1010,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setCanvaEmbed('');
     setPdfLink('');
     setReadTime('5 min read');
+    setPublishDate('');
     setExcerpt('');
     setContent('');
     setStatus('draft');
@@ -787,9 +1020,20 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setSeriesPart('');
     setAuthorId('priyasha-priyal-jena');
     setAuthorName('Priyasha Priyal Jena');
+    setAuthorOrcid('');
+    setDoi('');
+    setCoAuthors([]);
+    setNewCoName('');
+    setNewCoRole('');
+    setNewCoAffiliation('');
+    setNewCoOrcid('');
+    setNewCoEmail('');
     setSources([]);
     setSelectedVersionIndex(null);
     setAiMetadataReasoning(null);
+    setMetaTitle('');
+    setMetaDescription('');
+    setCanonicalUrl('');
   };
 
   const handleEditArticle = async (art: Article) => {
@@ -803,6 +1047,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setCanvaEmbed(art.canvaEmbed || '');
     setPdfLink(art.pdfLink || '');
     setReadTime(art.readTime || '5 min read');
+    setPublishDate(art.publishDate || '');
     setExcerpt(art.excerpt || '');
     setContent(art.content || '');
     setStatus(art.status);
@@ -812,8 +1057,19 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setSeriesPart(art.seriesPart || '');
     setAuthorId(art.authorId || 'priyasha-priyal-jena');
     setAuthorName(art.authorName || 'Priyasha Priyal Jena');
+    setAuthorOrcid(art.authorOrcid || '');
+    setDoi(art.doi || '');
+    setCoAuthors(art.coAuthors || []);
+    setNewCoName('');
+    setNewCoRole('');
+    setNewCoAffiliation('');
+    setNewCoOrcid('');
+    setNewCoEmail('');
     setSources(art.sources || []);
     setSelectedVersionIndex(null);
+    setMetaTitle(art.metaTitle || art.seoTitle || '');
+    setMetaDescription(art.metaDescription || art.seoDescription || '');
+    setCanonicalUrl(art.canonicalUrl || '');
     setActiveTab('write');
 
     // If full content is not in summary payload, fetch full manuscript on demand
@@ -989,15 +1245,22 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
         <nav className="flex flex-row md:flex-col overflow-x-auto md:overflow-x-visible divide-x md:divide-x-0 md:divide-y divide-paper/5 py-2 md:py-4 shrink-0">
           {[
-            { id: 'write', label: '✏ Write Post' },
-            { id: 'articles', label: '📋 All Articles' },
-            { id: 'tips', label: `📬 Tips (${tips.filter(t => !t.isRead).length})` },
-            { id: 'discourse', label: `💬 Peer Discourse (${unverifiedReviewsCount})` },
-            { id: 'reading', label: '📚 Reading shelf' },
-            { id: 'subscribers', label: `📧 Subscribers (${subscribers.length})` },
-            { id: 'analytics', label: '📊 Analytics' },
-            { id: 'settings', label: '⚙ Security' }
-          ].map((tab) => (
+            { id: 'contributor_dashboard', label: effectiveRole === 'author' ? '📊 Scholar Overview' : '📊 Contributor Hub', roles: ['admin', 'author'] },
+            { id: 'write', label: effectiveRole === 'author' ? '✏ Write Manuscript' : '✏ Write Post', roles: ['admin', 'author'] },
+            { id: 'articles', label: effectiveRole === 'author' ? '📋 My Manuscripts' : effectiveRole === 'reviewer' ? '📋 Scholarly Corpus' : '📋 All Articles', roles: ['admin', 'reviewer', 'author'] },
+            { id: 'authors', label: `👥 Authors (${contributors.length})`, roles: ['admin'] },
+            { id: 'pitches', label: effectiveRole === 'author' ? `📑 My Submissions (${pendingPitchesCount})` : `📑 Review Queue${pendingPitchesCount > 0 ? ` (${pendingPitchesCount})` : ''}`, roles: ['admin', 'reviewer', 'author'] },
+            { id: 'discourse', label: `💬 Peer Marginalia (${unverifiedReviewsCount})`, roles: ['admin', 'reviewer'] },
+            { id: 'team', label: '👥 Editorial Staff (RBAC)', roles: ['admin'] },
+            { id: 'tips', label: `📬 Tips (${tips.filter(t => !t.isRead).length})`, roles: ['admin'] },
+            { id: 'reading', label: '📚 Reading shelf', roles: ['admin', 'reviewer'] },
+            { id: 'subscribers', label: `📧 Subscribers (${subscribers.length})`, roles: ['admin'] },
+            { id: 'analytics', label: '📊 Analytics', roles: ['admin'] },
+            { id: 'site_content', label: '🌐 Site Content & CMS', roles: ['admin'] },
+            { id: 'settings', label: '⚙ Security', roles: ['admin'] }
+          ]
+            .filter(tab => tab.roles.includes(effectiveRole))
+            .map((tab) => (
             <button
               key={tab.id}
               onClick={() => {
@@ -1015,23 +1278,25 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
           ))}
         </nav>
 
-        {/* Admin profile & logout */}
-        <div className="mt-auto p-4 border-t border-paper/5 hidden md:flex items-center justify-between">
-          <div className="flex flex-col">
-            <span className="font-serif text-xs text-paper/70 font-bold truncate max-w-36">
-              {auth.currentUser?.email}
-            </span>
-            <span className="font-sans text-[8px] text-paper/30 uppercase tracking-widest">
-              Author Account
-            </span>
+        {/* User profile & role badge */}
+        <div className="mt-auto p-4 border-t border-paper/5 hidden md:flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="font-serif text-xs text-paper/80 font-bold truncate max-w-36">
+                {currentUser?.displayName || auth.currentUser?.email}
+              </span>
+              <span className={`font-sans text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.2 rounded-xs border w-fit mt-0.5 ${roleMeta.color}`}>
+                {roleMeta.badge}
+              </span>
+            </div>
+            <button 
+              onClick={handleSignOutAction}
+              className="text-paper/40 hover:text-red-400 p-1.5 cursor-pointer rounded-xs hover:bg-paper/5 transition-colors"
+              title="Sign Out"
+            >
+              <LogOut size={13} />
+            </button>
           </div>
-          <button 
-            onClick={handleSignOutAction}
-            className="text-paper/40 hover:text-red-400 p-2 cursor-pointer"
-            title="Sign Out"
-          >
-            <LogOut size={14} />
-          </button>
         </div>
       </aside>
 
@@ -1040,21 +1305,51 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
         <div className="flex flex-col gap-6">
           
           {/* Workspace Banner */}
-          <div className="flex justify-between items-center border-b border-paper/10 pb-5">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-paper/10 pb-5 gap-4">
             <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`font-sans text-[8px] font-bold tracking-widest uppercase px-2 py-0.5 rounded-xs border ${roleMeta.color}`}>
+                  {roleMeta.badge}
+                </span>
+                <span className="font-sans text-[8px] text-paper/30 uppercase tracking-widest">
+                  theoligarchy.in • Role-Based Editorial Workspace
+                </span>
+              </div>
               <h2 className="font-display text-2xl font-semibold italic text-paper/90 capitalize">
-                {activeTab === 'write' ? (editingId ? 'Edit Article' : 'Write Post') : `${activeTab} Panel`}
+                {activeTab === 'contributor_dashboard' ? (effectiveRole === 'author' ? 'Scholar Analytics & Manuscript Insights' : 'Contributor Intelligence & Paper Reach') : activeTab === 'write' ? (editingId ? 'Edit Manuscript' : (effectiveRole === 'author' ? 'Compose Manuscript' : 'Write Post')) : activeTab === 'team' ? 'Editorial Staff & RBAC Registry' : `${activeTab} Panel`}
               </h2>
-              <span className="font-sans text-[8px] text-paper/30 uppercase tracking-widest">
-                theoligarchy.in • System Administrator
-              </span>
             </div>
 
-            {/* Quick action buttons */}
-            <div className="flex items-center gap-3">
+            {/* Persona Simulator & Quick Actions */}
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Interactive Role Switcher for seamless testing */}
+              <div className="flex items-center gap-1 bg-ink border border-paper/15 p-1 rounded-sm shadow-xs">
+                <span className="font-sans text-[8px] font-bold uppercase tracking-wider text-paper/40 px-1.5 flex items-center gap-1">
+                  <ShieldCheck size={10} className="text-blood" />
+                  Role View:
+                </span>
+                {(['admin', 'reviewer', 'author'] as EditorialRole[]).map((r) => {
+                  const isCurrent = effectiveRole === r;
+                  return (
+                    <button
+                      key={r}
+                      onClick={() => handleSwitchSimulatedRole(r === currentUser?.role ? null : r)}
+                      className={`font-sans text-[8px] font-bold uppercase tracking-wider px-2 py-1 rounded-xs transition-all cursor-pointer ${
+                        isCurrent 
+                          ? 'bg-blood text-paper shadow-xs' 
+                          : 'text-paper/40 hover:text-paper hover:bg-paper/5'
+                      }`}
+                      title={`Preview workspace with ${ROLE_LABELS[r].title} permissions`}
+                    >
+                      {r === 'admin' ? 'Managing Editor' : r === 'reviewer' ? 'Peer Reviewer' : 'Guest Researcher'}
+                    </button>
+                  );
+                })}
+              </div>
+
               {autoSaveActive && (
                 <span className="font-serif text-[10px] italic text-[#8bc4a8] bg-[#8bc4a8]/5 border border-[#8bc4a8]/10 px-2 py-1 rounded-sm flex items-center gap-1">
-                  <Check size={10} /> Auto-save recovery complete
+                  <Check size={10} /> Auto-saved
                 </span>
               )}
               {localStorage.getItem('tol_autosave_recovery') && activeTab === 'write' && (
@@ -1080,10 +1375,42 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
             </div>
           )}
 
+          {/* ══ TAB: CONTRIBUTOR HUB & SCHOLAR ANALYTICS ══ */}
+          {activeTab === 'contributor_dashboard' && (
+            <div className="fade-in">
+              <ContributorDashboard
+                currentUser={currentUser}
+                currentUserRole={effectiveRole}
+                articles={allArticles}
+                submissions={allSubmissions}
+                onEditArticle={(art) => {
+                  handleEditArticle(art);
+                  setActiveTab('write');
+                }}
+                onComposeNew={() => {
+                  clearWriteForm();
+                  setActiveTab('write');
+                }}
+                onOpenReviewQueue={() => setActiveTab('pitches')}
+              />
+            </div>
+          )}
+
           {/* ══ TAB 1: WRITE/EDIT POST ══ */}
           {activeTab === 'write' && (
             <div className="flex flex-col gap-6 fade-in">
               
+              {/* Role Context Notification for Authors */}
+              {effectiveRole === 'author' && (
+                <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-sm flex items-start gap-3 text-xs text-amber-200/90 font-serif shadow-xs">
+                  <ShieldCheck size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="font-sans text-[9px] uppercase tracking-wider text-amber-400 block mb-0.5">Author / Guest Researcher Mode:</strong>
+                    You are drafting a research manuscript under your author credentials. Drafts are saved privately to your account. When completed, submitting for Peer Review routes your investigation into the editorial evaluation pipeline for review and approval.
+                  </div>
+                </div>
+              )}
+
               {/* Gemini AI Smart Assistant Banner */}
               <div className="bg-gradient-to-r from-navy via-navy to-blood/10 border border-blood/30 p-4 rounded-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
                 <div className="flex items-start gap-3">
@@ -1245,6 +1572,223 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                 </div>
               </div>
 
+              {/* Row: Publication Date & Estimated Read Time */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 border-t border-paper/10 pt-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex justify-between items-center">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40 flex items-center gap-1.5">
+                      <Clock size={11} className="text-blood" /> Published Date (Custom / Historical)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setPublishDate(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}
+                      className="font-sans text-[8px] uppercase tracking-wider text-blood hover:underline cursor-pointer"
+                    >
+                      Set Today's Date
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="e.g. 14 May 2024 or 2024-05-14"
+                    value={publishDate}
+                    onChange={(e) => setPublishDate(e.target.value)}
+                    className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none focus:border-blood text-sm"
+                  />
+                  <span className="font-serif text-[10px] text-paper/30 italic">Leave blank to automatically stamp the date when published.</span>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40 flex items-center gap-1.5">
+                    <Clock size={11} className="text-paper/40" /> Estimated Read Time
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 8 min read"
+                    value={readTime}
+                    onChange={(e) => setReadTime(e.target.value)}
+                    className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none focus:border-blood text-sm"
+                  />
+                  <span className="font-serif text-[10px] text-paper/30 italic">Auto-calculated from word count if not manually specified.</span>
+                </div>
+              </div>
+
+              {/* Academic Identification & Multi-Author Attribution */}
+              <div className="border border-paper/10 p-5 rounded-sm bg-navy/30 space-y-4">
+                <div className="flex items-center justify-between border-b border-paper/10 pb-3">
+                  <div className="flex items-center gap-2">
+                    <GraduationCap size={15} className="text-amber-400" />
+                    <span className="font-sans text-[10px] font-bold tracking-widest text-paper uppercase">
+                      Academic Attribution, ORCID &amp; Co-Authorship
+                    </span>
+                  </div>
+                  <span className="font-mono text-[9px] text-[#a6ce39] bg-[#a6ce39]/10 px-2 py-0.5 border border-[#a6ce39]/30 rounded-xs">
+                    Citation Engine Ready
+                  </span>
+                </div>
+
+                {/* Author Selection from Registry */}
+                <div className="bg-midnight/40 p-3 rounded-xs border border-paper/10 flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60 flex items-center gap-1.5">
+                      <Users size={12} className="text-blood" /> Select Registered Contributor / Scholar
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('authors')}
+                      className="text-blood hover:underline font-sans text-[9px] uppercase tracking-wider cursor-pointer"
+                    >
+                      + Manage Authors Registry
+                    </button>
+                  </div>
+                  <select
+                    value={authorId}
+                    onChange={(e) => {
+                      const selectedId = e.target.value;
+                      setAuthorId(selectedId);
+                      const found = contributors.find(c => c.id === selectedId);
+                      if (found) {
+                        setAuthorName(found.name);
+                        if (found.orcid) setAuthorOrcid(found.orcid);
+                      }
+                    }}
+                    className="bg-navy border border-paper/15 rounded-xs p-2 text-paper text-xs cursor-pointer focus:outline-none focus:border-blood font-serif"
+                  >
+                    <option value="">-- Choose Registered Author Profile (Auto-fills Byline) --</option>
+                    {contributors.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} {c.isFounder ? '★ (Founder)' : `(${c.role})`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                      Primary Author Name
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Priyasha Priyal Jena"
+                      value={authorName}
+                      onChange={(e) => setAuthorName(e.target.value)}
+                      className="bg-navy border border-paper/10 rounded-sm py-2 px-3 text-paper font-serif focus:outline-none focus:border-blood text-xs"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40 flex items-center justify-between">
+                      <span>Primary Author ORCID iD</span>
+                      <span className="font-mono text-[8px] text-paper/30">XXXX-XXXX-XXXX-XXXX</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 0000-0002-1825-0097"
+                      value={authorOrcid}
+                      onChange={(e) => setAuthorOrcid(e.target.value)}
+                      className="bg-navy border border-paper/10 rounded-sm py-2 px-3 text-paper font-mono focus:outline-none focus:border-blood text-xs"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                      Digital Object Identifier (DOI) / Archival Ref
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 10.5281/zenodo.10892341"
+                      value={doi}
+                      onChange={(e) => setDoi(e.target.value)}
+                      className="bg-navy border border-paper/10 rounded-sm py-2 px-3 text-paper font-mono focus:outline-none focus:border-blood text-xs"
+                    />
+                  </div>
+                </div>
+
+                {/* Co-Authors / Secondary Researchers builder */}
+                <div className="pt-2 border-t border-paper/5">
+                  <span className="font-sans text-[9px] font-bold tracking-widest text-paper/50 uppercase block mb-3">
+                    + Multi-Author &amp; Co-Researcher Attribution ({coAuthors.length} Attached)
+                  </span>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 items-end bg-navy/60 p-3 rounded-sm border border-paper/5">
+                    <div className="flex flex-col gap-1">
+                      <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">Co-Author Name *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Dr. A. Sharma"
+                        value={newCoName}
+                        onChange={(e) => setNewCoName(e.target.value)}
+                        className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">Scholarly Role</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Co-Author / Forensic Consultant"
+                        value={newCoRole}
+                        onChange={(e) => setNewCoRole(e.target.value)}
+                        className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">Institution / University</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Oxford Criminology Dept"
+                        value={newCoAffiliation}
+                        onChange={(e) => setNewCoAffiliation(e.target.value)}
+                        className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">ORCID iD</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 0000-0001-2345-6789"
+                        value={newCoOrcid}
+                        onChange={(e) => setNewCoOrcid(e.target.value)}
+                        className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs font-mono"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addCoAuthorItem}
+                      className="bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/40 text-amber-300 font-sans text-[9px] font-bold tracking-widest uppercase py-2 px-3 rounded-xs flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <Plus size={11} /> Add Co-Author
+                    </button>
+                  </div>
+
+                  {/* Attached Co-Authors chips */}
+                  {coAuthors.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {coAuthors.map((co, idx) => (
+                        <div 
+                          key={idx} 
+                          className="flex items-center gap-2 bg-navy border border-paper/15 px-3 py-1.5 rounded-sm text-xs text-paper"
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-paper font-serif">{co.name}</span>
+                            <span className="font-sans text-[9px] text-paper/40">
+                              {co.role || 'Co-Author'} {co.institution ? `· ${co.institution}` : ''} {co.orcid ? `[ORCID: ${co.orcid}]` : ''}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeCoAuthorItem(idx)}
+                            className="text-red-400 hover:text-red-300 ml-2 font-bold cursor-pointer text-xs"
+                            title="Remove Co-Author"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Row 4: Custom tags inline constructor */}
               <div className="flex flex-col gap-1.5">
                 <div className="flex justify-between items-center">
@@ -1395,6 +1939,142 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                 />
               </div>
 
+              {/* ══ DEDICATED SEO & SEARCH ENGINE OPTIMIZATION ENGINE ══ */}
+              <div className="border border-paper/10 p-5 rounded-sm bg-navy/25 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-paper/10 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Search size={15} className="text-blood" />
+                    <span className="font-sans text-[10px] font-bold tracking-widest text-paper uppercase">
+                      Search Engine Optimization (SEO) &amp; Google Snippet
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[9px] text-[#8bc4a8] bg-[#8bc4a8]/10 px-2 py-0.5 border border-[#8bc4a8]/30 rounded-xs">
+                      SERP &amp; OpenGraph Ready
+                    </span>
+                  </div>
+                </div>
+
+                {/* Live Search Engine Result Page (SERP) Preview Box */}
+                <div className="bg-[#1f1f1f] border border-paper/15 rounded-sm p-4 text-left font-sans shadow-inner">
+                  <div className="font-sans text-[8px] font-bold uppercase tracking-widest text-paper/40 mb-2 flex items-center gap-1.5">
+                    <Globe size={10} className="text-paper/40" /> Google Search Appearance (Live Preview)
+                  </div>
+                  
+                  {/* Google SERP Card */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-[11px] text-[#bdc1c6] truncate">
+                      <span className="w-3.5 h-3.5 rounded-full bg-paper/10 flex items-center justify-center text-[9px] text-paper/70 font-serif font-bold">O</span>
+                      <span className="font-sans text-[#dadce0]">theoligarchy.in</span>
+                      <span className="text-[#9aa0a6] text-[10px]">› {category} › {slug || 'manuscript-slug'}</span>
+                    </div>
+                    
+                    <div className="text-[17px] text-[#8ab4f8] hover:underline cursor-pointer font-sans leading-tight line-clamp-1">
+                      {metaTitle.trim() || title.trim() || 'Untitled Investigation — The Oligarchy'} | The Oligarchy
+                    </div>
+                    
+                    <p className="text-[12px] text-[#bdc1c6] font-sans leading-relaxed line-clamp-2 mt-0.5">
+                      <span className="text-[#9aa0a6]">{publishDate || 'Recent'} — </span>
+                      {metaDescription.trim() || excerpt.trim() || 'Independent research and scholarly analysis into crime, human psychology, politics, and systemic power dynamics.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Meta Title and Meta Description Input Fields */}
+                <div className="grid grid-cols-1 gap-4">
+                  {/* Meta Title Field */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40 flex items-center gap-1">
+                        <span>Meta Title</span>
+                        <span className="text-paper/25 font-normal lowercase">(search engine headline tag)</span>
+                      </label>
+                      <div className="flex items-center gap-3">
+                        {title.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => setMetaTitle(title.trim())}
+                            className="font-sans text-[8px] uppercase tracking-wider text-blood hover:underline cursor-pointer flex items-center gap-1"
+                          >
+                            <Copy size={9} /> Copy Article Title
+                          </button>
+                        )}
+                        <span className={`font-mono text-[9px] font-bold ${
+                          metaTitle.length === 0 ? 'text-paper/30' :
+                          metaTitle.length <= 40 ? 'text-amber-400' :
+                          metaTitle.length <= 60 ? 'text-[#8bc4a8]' : 'text-red-400'
+                        }`}>
+                          {metaTitle.length}/60 chars {metaTitle.length > 60 ? '• Long (may truncate)' : metaTitle.length >= 40 ? '• Optimal' : metaTitle.length > 0 ? '• Short' : ''}
+                        </span>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder={title ? `${title} | The Oligarchy` : "e.g. The Psychology of Power: A Critical Study | The Oligarchy"}
+                      value={metaTitle}
+                      onChange={(e) => setMetaTitle(e.target.value)}
+                      className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none focus:border-blood text-sm"
+                    />
+                    <span className="font-serif text-[10px] text-paper/30 italic">
+                      Recommended 50–60 characters. Appears as the primary clickable title in search engine results and browser tab titles.
+                    </span>
+                  </div>
+
+                  {/* Meta Description Field */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40 flex items-center gap-1">
+                        <span>Meta Description</span>
+                        <span className="text-paper/25 font-normal lowercase">(search snippet preview)</span>
+                      </label>
+                      <div className="flex items-center gap-3">
+                        {excerpt.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => setMetaDescription(excerpt.trim())}
+                            className="font-sans text-[8px] uppercase tracking-wider text-blood hover:underline cursor-pointer flex items-center gap-1"
+                          >
+                            <Copy size={9} /> Copy Excerpt
+                          </button>
+                        )}
+                        <span className={`font-mono text-[9px] font-bold ${
+                          metaDescription.length === 0 ? 'text-paper/30' :
+                          metaDescription.length < 110 ? 'text-amber-400' :
+                          metaDescription.length <= 160 ? 'text-[#8bc4a8]' : 'text-red-400'
+                        }`}>
+                          {metaDescription.length}/160 chars {metaDescription.length > 160 ? '• Long (may truncate)' : metaDescription.length >= 110 ? '• Optimal' : metaDescription.length > 0 ? '• Short' : ''}
+                        </span>
+                      </div>
+                    </div>
+                    <textarea
+                      placeholder={excerpt ? excerpt : "e.g. An empirical investigation into institutional hierarchy, persuasion mechanisms, and psychological dynamics of power systems..."}
+                      rows={2}
+                      value={metaDescription}
+                      onChange={(e) => setMetaDescription(e.target.value)}
+                      className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3.5 text-paper font-serif focus:outline-none focus:border-blood text-sm resize-none"
+                    />
+                    <span className="font-serif text-[10px] text-paper/30 italic">
+                      Recommended 120–160 characters. Summarizes the investigation for search engines, web crawlers, and link unfurling cards.
+                    </span>
+                  </div>
+
+                  {/* Canonical URL / Cross-Posting Link (Optional) */}
+                  <div className="flex flex-col gap-1.5 pt-2 border-t border-paper/5">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40 flex items-center justify-between">
+                      <span>Canonical URL (Optional Academic Cross-Posting Override)</span>
+                      <span className="font-mono text-[8px] text-paper/30">Defaults to theoligarchy.in/post/{slug || '...'}</span>
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://theoligarchy.in/post/... or external academic journal DOI/SSRN link"
+                      value={canonicalUrl}
+                      onChange={(e) => setCanonicalUrl(e.target.value)}
+                      className="bg-navy border border-paper/10 rounded-sm py-2 px-3 text-paper font-mono focus:outline-none focus:border-blood text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* Row 7: Modern Scholarly Quill Rich-Text Editor */}
               <div className="flex flex-col gap-1.5">
                 <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
@@ -1511,21 +2191,51 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                 </div>
               </div>
 
+              {/* Collaborative Draft Workflow: Fact-Checking, Legal & Citation Marginalia */}
+              <div className="pt-2">
+                <DraftInternalNotes
+                  articleId={editingId || (slug || 'draft-manuscript-workspace')}
+                  articleTitle={title || 'Untitled Manuscript Draft'}
+                  currentUser={currentUser}
+                  currentUserRole={effectiveRole}
+                />
+              </div>
+
               {/* Publish State Options */}
               <div className="flex flex-wrap gap-4 pt-4 border-t border-paper/10 items-center justify-between">
                 <div className="flex flex-wrap gap-3 items-center">
-                  <button
-                    onClick={() => handleSavePost('published')}
-                    className="bg-blood hover:bg-blood-light text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm shadow-md cursor-pointer"
-                  >
-                    {editingId ? 'Apply Updates & Publish' : 'Publish Article'}
-                  </button>
-                  <button
-                    onClick={() => handleSavePost('draft')}
-                    className="bg-transparent border border-paper/20 hover:border-blood hover:text-paper hover:bg-blood/5 text-paper/60 font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm cursor-pointer transition-colors"
-                  >
-                    Save as Draft
-                  </button>
+                  {effectiveRole === 'author' ? (
+                    <>
+                      <button
+                        onClick={() => handleSavePost('published')}
+                        className="bg-blood hover:bg-blood-light text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm shadow-md cursor-pointer flex items-center gap-2"
+                        title="Submit your completed manuscript to the Editorial Review Queue"
+                      >
+                        <Send size={12} /> Submit for Peer Review
+                      </button>
+                      <button
+                        onClick={() => handleSavePost('draft')}
+                        className="bg-transparent border border-paper/20 hover:border-blood hover:text-paper hover:bg-blood/5 text-paper/60 font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm cursor-pointer transition-colors"
+                      >
+                        Save Working Draft
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => handleSavePost('published')}
+                        className="bg-blood hover:bg-blood-light text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm shadow-md cursor-pointer"
+                      >
+                        {editingId ? 'Apply Updates & Publish' : 'Publish Article'}
+                      </button>
+                      <button
+                        onClick={() => handleSavePost('draft')}
+                        className="bg-transparent border border-paper/20 hover:border-blood hover:text-paper hover:bg-blood/5 text-paper/60 font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm cursor-pointer transition-colors"
+                      >
+                        Save as Draft
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={handleSuggestMetadata}
@@ -1549,9 +2259,26 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
             </div>
           )}
 
-          {/* ══ TAB 2: ALL ARTICLES ══ */}
+          {/* ══ TAB 2: ALL ARTICLES / MY MANUSCRIPTS ══ */}
           {activeTab === 'articles' && (
             <div className="flex flex-col gap-5 fade-in">
+              {effectiveRole === 'author' && (
+                <div className="bg-navy/60 border border-paper/10 p-4 rounded-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-paper/70 font-serif">
+                  <div className="flex items-center gap-2">
+                    <BookOpen size={14} className="text-blood shrink-0" />
+                    <span>
+                      <strong>Author Corpus:</strong> Displaying your personal drafts and live published papers. Private drafts from other authors are isolated under RBAC.
+                    </span>
+                  </div>
+                  <button 
+                    onClick={() => { clearWriteForm(); setActiveTab('write'); }}
+                    className="font-sans text-[9px] font-bold uppercase tracking-wider bg-blood text-paper px-3.5 py-1.5 rounded-sm hover:bg-blood-light cursor-pointer shrink-0"
+                  >
+                    + Compose New Manuscript
+                  </button>
+                </div>
+              )}
+
               <div className="overflow-x-auto border border-paper/10 rounded-sm">
                 <table className="w-full text-left border-collapse select-text">
                   <thead>
@@ -1564,73 +2291,97 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-paper/5 font-serif text-sm text-paper/70">
-                    {allArticles.length === 0 ? (
+                    {rbac.filterVisibleArticles(allArticles, currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole }).length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="py-8 text-center text-paper/30 italic">No articles logged currently. Go to Write tab to begin.</td>
+                        <td colSpan={5} className="py-8 text-center text-paper/30 italic">No manuscripts found in your scope. Go to Write tab to begin drafting.</td>
                       </tr>
                     ) : (
-                      allArticles.map((art) => (
+                      rbac.filterVisibleArticles(allArticles, currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole }).map((art) => (
                         <tr key={art.id} className="hover:bg-paper/[0.01] transition-colors">
                           <td className="py-4 px-4 font-bold text-paper/90 select-text">
-                            {art.isFeatured && <span className="text-blood mr-1" title="Pinned Pinned Featured">★</span>}
+                            {art.isFeatured && <span className="text-blood mr-1" title="Pinned Featured">★</span>}
                             {art.title}
                             {art.subtitle && <span className="block text-xs font-normal text-paper/40 mt-0.5">{art.subtitle}</span>}
+                            {art.authorName && <span className="block font-sans text-[9px] text-paper/35 mt-0.5">By {art.authorName}</span>}
                           </td>
                           <td className="py-4 px-4 capitalize font-sans text-xs">{art.category}</td>
                           <td className="py-4 px-4">
-                            <button
-                              onClick={() => handleTogglePublish(art)}
-                              className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-sm border cursor-pointer ${
+                            {effectiveRole === 'admin' ? (
+                              <button
+                                onClick={() => handleTogglePublish(art)}
+                                className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-sm border cursor-pointer ${
+                                  art.status === 'published' 
+                                    ? 'bg-green-950/10 text-[#8bc4a8] border-green-800/30' 
+                                    : 'bg-yellow-950/10 text-yellow-500 border-yellow-800/30'
+                                }`}
+                                title="Click to toggle draft/published"
+                              >
+                                {art.status === 'published' ? 'Live' : 'Draft'}
+                              </button>
+                            ) : (
+                              <span className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-sm border ${
                                 art.status === 'published' 
                                   ? 'bg-green-950/10 text-[#8bc4a8] border-green-800/30' 
                                   : 'bg-yellow-950/10 text-yellow-500 border-yellow-800/30'
-                              }`}
-                              title="Click to toggle draft/published"
-                            >
-                              {art.status === 'published' ? 'Live' : 'Draft'}
-                            </button>
+                              }`}>
+                                {art.status === 'published' ? 'Live' : 'Draft'}
+                              </span>
+                            )}
                           </td>
                           <td className="py-4 px-4 font-mono text-xs text-paper/40">{art.views || 0}</td>
                           <td className="py-4 px-4">
                             <div className="flex gap-2">
                               <button 
-                                onClick={() => handleEditArticle(art)}
-                                className="p-1.5 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood transition-colors rounded-sm cursor-pointer"
-                                title="Edit Article"
+                                onClick={() => setNotesArticleModal(art)}
+                                className="p-1.5 border border-paper/10 text-paper/50 hover:text-amber-300 hover:border-amber-400/40 transition-colors rounded-sm cursor-pointer"
+                                title="Draft Feedback, Fact-Checking & Legal Clearance Notes"
                               >
-                                <FileEdit size={13} />
+                                <MessageSquare size={13} />
                               </button>
-                              <button 
-                                onClick={() => handleDuplicateArticle(art)}
-                                className="p-1.5 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood transition-colors rounded-sm cursor-pointer"
-                                title="Duplicate Article"
-                              >
-                                <Copy size={13} />
-                              </button>
-                              {deleteConfirmArticleId === art.id ? (
-                                <div className="flex items-center gap-1 bg-red-950/40 border border-red-900/50 p-1 px-1.5 rounded-sm text-[9px] font-sans">
-                                  <span className="text-red-400 font-bold uppercase tracking-wider text-[7px] mr-1">Delete?</span>
-                                  <button
-                                    onClick={() => handleDeleteArticle(art.id)}
-                                    className="bg-red-800 hover:bg-red-700 text-white font-bold px-1.5 py-0.5 rounded-sm cursor-pointer text-[7px] uppercase"
-                                  >
-                                    Yes
-                                  </button>
-                                  <button
-                                    onClick={() => setDeleteConfirmArticleId(null)}
-                                    className="bg-paper/10 hover:bg-paper/20 text-paper/70 font-bold px-1.5 py-0.5 rounded-sm cursor-pointer text-[7px] uppercase"
-                                  >
-                                    No
-                                  </button>
-                                </div>
-                              ) : (
+                              {rbac.canEditArticle(art, currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole }) && (
                                 <button 
-                                  onClick={() => setDeleteConfirmArticleId(art.id)}
-                                  className="p-1.5 border border-paper/10 text-paper/30 hover:text-red-400 hover:border-red-400/40 transition-colors rounded-sm cursor-pointer"
-                                  title="Delete Post"
+                                  onClick={() => handleEditArticle(art)}
+                                  className="p-1.5 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood transition-colors rounded-sm cursor-pointer"
+                                  title="Edit Manuscript"
                                 >
-                                  <Trash2 size={13} />
+                                  <FileEdit size={13} />
                                 </button>
+                              )}
+                              {effectiveRole === 'admin' && (
+                                <button 
+                                  onClick={() => handleDuplicateArticle(art)}
+                                  className="p-1.5 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood transition-colors rounded-sm cursor-pointer"
+                                  title="Duplicate Article"
+                                >
+                                  <Copy size={13} />
+                                </button>
+                              )}
+                              {rbac.canDeleteArticle(art, currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole }) && (
+                                deleteConfirmArticleId === art.id ? (
+                                  <div className="flex items-center gap-1 bg-red-950/40 border border-red-900/50 p-1 px-1.5 rounded-sm text-[9px] font-sans">
+                                    <span className="text-red-400 font-bold uppercase tracking-wider text-[7px] mr-1">Delete?</span>
+                                    <button
+                                      onClick={() => handleDeleteArticle(art.id)}
+                                      className="bg-red-800 hover:bg-red-700 text-white font-bold px-1.5 py-0.5 rounded-sm cursor-pointer text-[7px] uppercase"
+                                    >
+                                      Yes
+                                    </button>
+                                    <button
+                                      onClick={() => setDeleteConfirmArticleId(null)}
+                                      className="bg-paper/10 hover:bg-paper/20 text-paper/70 font-bold px-1.5 py-0.5 rounded-sm cursor-pointer text-[7px] uppercase"
+                                    >
+                                      No
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button 
+                                    onClick={() => setDeleteConfirmArticleId(art.id)}
+                                    className="p-1.5 border border-paper/10 text-paper/30 hover:text-red-400 hover:border-red-400/40 transition-colors rounded-sm cursor-pointer"
+                                    title="Delete Post"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )
                               )}
                             </div>
                           </td>
@@ -1640,6 +2391,46 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* ══ TAB: PEER REVIEW QUEUE & MANUSCRIPT TRIAGE PIPELINE ══ */}
+          {activeTab === 'pitches' && (
+            <div className="fade-in">
+              <ReviewQueuePipeline 
+                onConvertToArticle={handleConvertPitchToArticle}
+                resendApiKey={resendApiKey}
+                currentUserRole={effectiveRole}
+                userEmail={currentUser?.email || auth.currentUser?.email || undefined}
+              />
+            </div>
+          )}
+
+          {/* ══ TAB: EDITORIAL STAFF & RBAC REGISTRY ══ */}
+          {activeTab === 'team' && (
+            <div className="fade-in">
+              <EditorialTeamManager 
+                currentUserRole={effectiveRole} 
+                onSimulateRoleChange={handleSwitchSimulatedRole}
+                activeSimulatedRole={simulatedRole || undefined}
+              />
+            </div>
+          )}
+
+          {/* ══ TAB: AUTHORS & SCHOLAR PROFILES REGISTRY ══ */}
+          {activeTab === 'authors' && (
+            <div className="fade-in">
+              <AuthorManager
+                contributors={contributors}
+                allArticles={allArticles}
+                onRefresh={loadContributorsList}
+                onSelectAuthorForArticle={(author) => {
+                  setAuthorId(author.id);
+                  setAuthorName(author.name);
+                  if (author.orcid) setAuthorOrcid(author.orcid);
+                  setActiveTab('write');
+                }}
+              />
             </div>
           )}
 
@@ -1793,6 +2584,13 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
               allArticles={allArticles} 
               subscribersCount={subscribers.length} 
             />
+          )}
+
+          {/* ══ TAB: SITE CONTENT & CMS CUSTOMIZATION ══ */}
+          {activeTab === 'site_content' && (
+            <div className="fade-in">
+              <SiteContentManager allArticles={allArticles} />
+            </div>
           )}
 
           {/* ══ TAB 6: SECURITY & SETTINGS ══ */}
@@ -2168,6 +2966,34 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
         </div>
       </main>
+
+      {/* Editorial Fact-Checking & Marginalia Modal Dialog */}
+      {notesArticleModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-ink border border-paper/20 rounded-sm w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-6 shadow-2xl">
+            <div className="flex justify-between items-start border-b border-paper/10 pb-4">
+              <div>
+                <span className="font-sans text-[9px] font-bold uppercase tracking-widest text-blood">Editorial Clearance & Internal Notes</span>
+                <h3 className="font-display text-xl font-bold text-paper mt-1">{notesArticleModal.title}</h3>
+                <p className="font-sans text-xs text-paper/50">By {notesArticleModal.authorName || 'Staff'} • {notesArticleModal.category} • Status: {notesArticleModal.status}</p>
+              </div>
+              <button
+                onClick={() => setNotesArticleModal(null)}
+                className="font-sans text-xs text-paper/50 hover:text-paper uppercase tracking-wider px-3 py-1.5 border border-paper/10 hover:border-paper/30 rounded-sm cursor-pointer"
+              >
+                Close ✕
+              </button>
+            </div>
+
+            <DraftInternalNotes
+              articleId={notesArticleModal.id}
+              articleTitle={notesArticleModal.title}
+              currentUser={currentUser}
+              currentUserRole={effectiveRole}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

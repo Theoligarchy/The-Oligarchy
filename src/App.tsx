@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Fuse from 'fuse.js';
 import { db, auth, seedInitialDataIfEmpty, fetchArticlePreviews, fetchFullArticle } from './firebase';
-import { INITIAL_SEED_ARTICLES } from './data/initialSeed';
+import { INITIAL_SEED_ARTICLES, INITIAL_SEED_READING } from './data/initialSeed';
 import { 
   collection, 
   getDocs, 
@@ -13,7 +13,8 @@ import {
   increment
 } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Article, ReadingItem, AuthorProfile, SavedArticle } from './types';
+import { Article, ReadingItem, AuthorProfile, SavedArticle, SiteSettings } from './types';
+import { fetchSiteSettings, getCachedSiteSettings, DEFAULT_SITE_SETTINGS } from './utils/siteSettings';
 
 // Import modular subcomponents
 import Header from './components/Header';
@@ -33,6 +34,10 @@ import ContributorsSection from './components/ContributorsSection';
 import ReadingListDashboard from './components/ReadingListDashboard';
 import BookmarkButton from './components/BookmarkButton';
 import ArticleSkeleton from './components/ArticleSkeleton';
+import ManuscriptSubmissionPortal from './components/ManuscriptSubmissionPortal';
+import CitationGenerator from './components/CitationGenerator';
+import MultiAuthorAttribution from './components/MultiAuthorAttribution';
+import ContributorDashboard from './components/ContributorDashboard';
 import { 
   fetchUserSavedArticles, 
   saveArticleToReadingList, 
@@ -43,6 +48,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { getOptimizedImageUrl } from './utils/imageOptimizer';
 import { getCachedArticles, setCachedArticles } from './utils/articleCache';
+import { fetchContributors } from './utils/contributors';
 
 
 import { 
@@ -89,9 +95,11 @@ const logViewEntry = async (art: Article) => {
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('home');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [dateSortOrder, setDateSortOrder] = useState<'newest' | 'oldest'>('newest');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
   const [selectedContributorId, setSelectedContributorId] = useState<string | null>(null);
+  const [dashboardContributorId, setDashboardContributorId] = useState<string | null>(null);
   
   // Theme State
   const theme = 'dark';
@@ -104,6 +112,7 @@ export default function App() {
   const [savedArticles, setSavedArticles] = useState<SavedArticle[]>([]);
   const [contributors, setContributors] = useState<AuthorProfile[]>([]);
   const [adminUser, setAdminUser] = useState<User | null>(null);
+  const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => getCachedSiteSettings());
 
 
   // Newsletter states
@@ -260,11 +269,17 @@ export default function App() {
       const readingCol = collection(db, 'reading');
       const contributorsCol = collection(db, 'contributors');
 
-      // Fetch lightweight preview feed and auxiliary collections in parallel
+      // Fetch lightweight preview feed and auxiliary collections with graceful fallback handling
       const [previewsResult, readingSnapshot, contributorsSnapshot] = await Promise.all([
         fetchArticlePreviews({ status: 'all', sortBy: 'createdAt', limitCount: 60 }),
-        getDocs(readingCol),
-        getDocs(contributorsCol)
+        getDocs(readingCol).catch((err) => {
+          console.warn("Could not fetch reading items, using seed:", err);
+          return { docs: [] };
+        }),
+        getDocs(contributorsCol).catch((err) => {
+          console.warn("Could not fetch contributors, using default registry:", err);
+          return { docs: [] };
+        })
       ]);
 
       const articlesList = previewsResult.articles;
@@ -282,22 +297,37 @@ export default function App() {
       // Persist to local cache with timestamp & TTL validation for 0ms instant load on subsequent visits
       setCachedArticles(sortedArticles);
 
-      const readingList = readingSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      } as ReadingItem));
+      const readingList = readingSnapshot.docs.length > 0 
+        ? readingSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          } as ReadingItem))
+        : INITIAL_SEED_READING;
       
       setReadingItems(readingList.sort((a,b) => b.addedAt - a.addedAt));
 
-      const contributorsList = contributorsSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      } as AuthorProfile));
-      setContributors(contributorsList);
+      try {
+        const contributorsList = await fetchContributors();
+        setContributors(contributorsList);
+      } catch (err) {
+        console.warn("Could not fetch contributors list:", err);
+      }
 
-      // Fetch user saved research reading list
-      const userSavedList = await fetchUserSavedArticles();
-      setSavedArticles(userSavedList);
+      // Fetch user saved research reading list safely
+      try {
+        const userSavedList = await fetchUserSavedArticles();
+        setSavedArticles(userSavedList);
+      } catch (err) {
+        console.warn("Error fetching user saved articles:", err);
+      }
+
+      // Fetch dynamic site-wide CMS settings
+      try {
+        const settings = await fetchSiteSettings();
+        setSiteSettings(settings);
+      } catch (err) {
+        console.warn("Error fetching site settings:", err);
+      }
 
       // Direct Deep-Linking URL query parameter or path-based support on initial load
       const params = new URLSearchParams(window.location.search);
@@ -440,6 +470,32 @@ export default function App() {
 
     return () => unsubscribe();
   }, []);
+
+  // Synchronize SEO Meta Title and Meta Description tags dynamically
+  useEffect(() => {
+    if (activeTab === 'article-view' && selectedArticle) {
+      const pageTitle = selectedArticle.metaTitle || selectedArticle.seoTitle || `${selectedArticle.title} | ${siteSettings.siteName}`;
+      document.title = pageTitle;
+
+      const pageDesc = selectedArticle.metaDescription || selectedArticle.seoDescription || selectedArticle.excerpt;
+      if (pageDesc) {
+        let metaDescTag = document.querySelector('meta[name="description"]');
+        if (!metaDescTag) {
+          metaDescTag = document.createElement('meta');
+          metaDescTag.setAttribute('name', 'description');
+          document.head.appendChild(metaDescTag);
+        }
+        metaDescTag.setAttribute('content', pageDesc);
+      }
+    } else {
+      document.title = `${siteSettings.siteName} — ${siteSettings.tagline}`;
+      const defaultDesc = siteSettings.aboutText || "Independent Journal of Criminology, Psyche & Politics";
+      const metaDescTag = document.querySelector('meta[name="description"]');
+      if (metaDescTag) {
+        metaDescTag.setAttribute('content', defaultDesc);
+      }
+    }
+  }, [activeTab, selectedArticle, siteSettings]);
 
   // Saved Reading List Action Handlers
   const handleToggleSaveArticle = async (article: Article) => {
@@ -726,7 +782,7 @@ export default function App() {
     });
   }, [publishedArticles]);
 
-  // 3. Fast filter calculations utilizing the memoized search index
+  // 3. Fast filter calculations utilizing the memoized search index and published date sorting
   const filteredArticles = useMemo(() => {
     const query = searchQuery.trim();
     let list = publishedArticles;
@@ -747,8 +803,24 @@ export default function App() {
       }
     }
 
-    return list;
-  }, [publishedArticles, searchIndex, categoryFilter, searchQuery]);
+    // Helper for robust article timestamp resolution (publishDate parsed or fallback to createdAt)
+    const getArticleTimestamp = (art: Article): number => {
+      if (art.publishDate) {
+        const parsed = Date.parse(art.publishDate);
+        if (!isNaN(parsed)) return parsed;
+      }
+      return art.createdAt || 0;
+    };
+
+    // Sort research by Published Date (Newest vs Oldest)
+    const sorted = [...list].sort((a, b) => {
+      const timeA = getArticleTimestamp(a);
+      const timeB = getArticleTimestamp(b);
+      return dateSortOrder === 'newest' ? timeB - timeA : timeA - timeB;
+    });
+
+    return sorted;
+  }, [publishedArticles, searchIndex, categoryFilter, searchQuery, dateSortOrder]);
 
   // Extract all unique tags across published articles to enable cross-document tracing
   const allUniqueTags = useMemo(() => {
@@ -836,7 +908,7 @@ export default function App() {
       .slice(0, 3);
   }, [selectedArticle, articles]);
 
-  const featuredPost = articles.find(art => art.isFeatured && art.status === 'published');
+  const featuredPost = (siteSettings?.heroFeaturedArticleId ? articles.find(art => art.id === siteSettings.heroFeaturedArticleId) : null) || articles.find(art => art.isFeatured && art.status === 'published') || articles.find(art => art.status === 'published');
 
   const handleSearch = (queryText: string) => {
     setSearchQuery(queryText);
@@ -870,6 +942,7 @@ export default function App() {
           }}
           onSearch={handleSearch}
           savedCount={savedArticles.length}
+          siteSettings={siteSettings}
         />
       )}
 
@@ -892,16 +965,16 @@ export default function App() {
             <section className="relative overflow-hidden py-16 md:py-24 px-6 border-b border-paper/10 text-center flex flex-col items-center justify-center bg-gradient-to-b from-navy/30 to-transparent">
               <div className="font-sans text-[10px] font-bold tracking-[0.4em] uppercase text-blood mb-4 flex items-center gap-2">
                 <span className="w-6 h-px bg-blood" />
-                Journal of critical inquiry
+                {siteSettings?.tagline || 'Journal of critical inquiry'}
                 <span className="w-6 h-px bg-blood" />
               </div>
               
               <h2 className="font-display text-4xl md:text-6xl font-extrabold text-paper max-w-4xl leading-tight mb-6 select-text selection:bg-blood selection:text-paper">
-                The stories behind systems of power.
+                {siteSettings?.subheading || 'The stories behind systems of power.'}
               </h2>
               
               <p className="font-serif text-base md:text-lg text-paper/60 max-w-2xl leading-relaxed mb-10 select-text selection:bg-blood selection:text-paper">
-                Independent research into crime, psychology, politics, and systems of power, prioritising understanding over outrage and analysis over headlines.
+                {siteSettings?.missionStatement || 'Independent research into crime, psychology, politics, and systems of power, prioritising understanding over outrage and analysis over headlines.'}
               </p>
 
               <div className="flex gap-4 flex-wrap justify-center">
@@ -928,11 +1001,9 @@ export default function App() {
 
             {/* WHAT IS THE OLIGARCHY BRIEF BANNER */}
             <section className="py-12 px-6 border-b border-paper/5 max-w-4xl mx-auto text-center select-text selection:bg-blood selection:text-paper">
-              <h3 className="font-display text-2xl font-bold italic mb-5 text-paper">What is The Oligarchy?</h3>
+              <h3 className="font-display text-2xl font-bold italic mb-5 text-paper">What is {siteSettings?.siteName || 'The Oligarchy'}?</h3>
               <p className="font-serif text-sm leading-relaxed text-paper/50 max-w-2xl mx-auto">
-                The Oligarchy is an independent research publication exploring crime, human behavior, and institutions. 
-                Power is rarely distributed equally; decisions are shaped by hidden incentives, structures, and organizational rules. 
-                We seek strictly to study these operations with calm scholarly detachment.
+                {siteSettings?.missionStatement || 'The Oligarchy is an independent research publication exploring crime, human behavior, and institutions. Power is rarely distributed equally; decisions are shaped by hidden incentives, structures, and organizational rules. We seek strictly to study these operations with calm scholarly detachment.'}
               </p>
             </section>
 
@@ -962,19 +1033,19 @@ export default function App() {
                   {
                     id: 'criminology',
                     title: 'Criminology',
-                    desc: 'Research into criminal behaviour, organised crime, corruption, fraud, financial crime, and justice systems.',
+                    desc: siteSettings?.criminologyDescription || 'Research into criminal behaviour, organised crime, corruption, fraud, financial crime, and justice systems.',
                     emoji: '⚖️'
                   },
                   {
                     id: 'psyche',
                     title: 'Psychology',
-                    desc: 'Research into behaviour, persuasion, ideology, cognition, identity, and decision making.',
+                    desc: siteSettings?.psycheDescription || 'Research into behaviour, persuasion, ideology, cognition, identity, and decision making.',
                     emoji: '🧠'
                   },
                   {
                     id: 'politics',
                     title: 'Politics',
-                    desc: 'Research into institutions, governance, elites, incentives, and political systems.',
+                    desc: siteSettings?.politicsDescription || 'Research into institutions, governance, elites, incentives, and political systems.',
                     emoji: '🌐'
                   }
                 ].map((col) => (
@@ -1003,33 +1074,72 @@ export default function App() {
               
               {/* Left Column: List of Latest Articles */}
               <div className="md:col-span-8 flex flex-col gap-6">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-paper/10 pb-4">
-                  <h3 className="font-display text-2xl font-semibold italic text-paper">
-                    {categoryFilter === 'all' ? 'Latest Research & Analyses' : `${categoryFilter} Archives`}
-                  </h3>
+                <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 border-b border-paper/10 pb-4">
+                  <div>
+                    <h3 className="font-display text-2xl font-semibold italic text-paper">
+                      {categoryFilter === 'all' ? 'Latest Research & Analyses' : `${categoryFilter} Archives`}
+                    </h3>
+                  </div>
                   
-                  {/* Category filters bar */}
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      { id: 'all', label: 'All' },
-                      { id: 'criminology', label: 'Criminology' },
-                      { id: 'psyche', label: 'Psyche' },
-                      { id: 'politics', label: 'Politics' },
-                      { id: 'case-studies', label: 'Studies' },
-                      { id: 'research-notes', label: 'Notes' }
-                    ].map((btn) => (
-                      <button
-                        key={btn.id}
-                        onClick={() => setCategoryFilter(btn.id)}
-                        className={`font-sans text-[9px] font-semibold tracking-wider uppercase py-1 px-3 border transition-colors cursor-pointer rounded-sm ${
-                          categoryFilter === btn.id 
-                            ? 'bg-blood border-blood text-paper' 
-                            : 'border-paper/10 text-paper/40 hover:border-blood hover:text-paper'
-                        }`}
-                      >
-                        {btn.label}
-                      </button>
-                    ))}
+                  {/* Category & Date filters bar */}
+                  <div className="flex flex-wrap items-center gap-2.5 w-full xl:w-auto justify-between xl:justify-end">
+                    {/* Category filters */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { id: 'all', label: 'All' },
+                        { id: 'criminology', label: 'Criminology' },
+                        { id: 'psyche', label: 'Psyche' },
+                        { id: 'politics', label: 'Politics' },
+                        { id: 'case-studies', label: 'Studies' },
+                        { id: 'research-notes', label: 'Notes' }
+                      ].map((btn) => (
+                        <button
+                          key={btn.id}
+                          onClick={() => setCategoryFilter(btn.id)}
+                          className={`font-sans text-[9px] font-semibold tracking-wider uppercase py-1 px-3 border transition-colors cursor-pointer rounded-sm ${
+                            categoryFilter === btn.id 
+                              ? 'bg-blood border-blood text-paper shadow-xs font-bold' 
+                              : 'border-paper/10 text-paper/40 hover:border-blood hover:text-paper'
+                          }`}
+                        >
+                          {btn.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Published Date Filter (Newest vs Oldest) */}
+                    <div className="flex items-center bg-navy border border-paper/10 rounded-sm p-0.5">
+                      <span className="font-sans text-[8px] font-bold tracking-wider uppercase text-paper/40 px-2 flex items-center gap-1 select-none">
+                        <Calendar size={10} className="text-blood" />
+                        <span>Date:</span>
+                      </span>
+                      <div className="flex items-center gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setDateSortOrder('newest')}
+                          title="Filter and sort by newest published date"
+                          className={`font-sans text-[9px] font-semibold tracking-wider uppercase py-1 px-2.5 rounded-xs transition-all cursor-pointer flex items-center gap-1 ${
+                            dateSortOrder === 'newest'
+                              ? 'bg-blood text-paper shadow-xs font-bold'
+                              : 'text-paper/40 hover:text-paper hover:bg-paper/5'
+                          }`}
+                        >
+                          Newest
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDateSortOrder('oldest')}
+                          title="Filter and sort by oldest published date"
+                          className={`font-sans text-[9px] font-semibold tracking-wider uppercase py-1 px-2.5 rounded-xs transition-all cursor-pointer flex items-center gap-1 ${
+                            dateSortOrder === 'oldest'
+                              ? 'bg-blood text-paper shadow-xs font-bold'
+                              : 'text-paper/40 hover:text-paper hover:bg-paper/5'
+                          }`}
+                        >
+                          Oldest
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1325,7 +1435,6 @@ export default function App() {
         )}
 
         {/* ══ VIEW: RESEARCH CONTRIBUTORS PAGE ══ */}
-
         {activeTab === 'contributors' && (
           <ContributorsSection 
             articles={articles}
@@ -1339,6 +1448,57 @@ export default function App() {
             }}
             onOpenContact={() => {
               setActiveTab('contact');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOpenSubmitInvestigation={() => {
+              setActiveTab('submit-investigation');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOpenContributorDashboard={(id) => {
+              setDashboardContributorId(id);
+              setActiveTab('contributor-dashboard');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        )}
+
+        {/* ══ VIEW: CONTRIBUTOR DASHBOARD (GUEST RESEARCHERS & SCHOLARS) ══ */}
+        {(activeTab === 'contributor-dashboard' || activeTab === 'contributor-hub') && (
+          <div className="py-8 md:py-12 px-4 md:px-8 max-w-7xl mx-auto">
+            <ContributorDashboard 
+              currentUser={adminUser ? {
+                uid: adminUser.uid,
+                email: adminUser.email || 'theoligarchy.ppj@gmail.com',
+                displayName: adminUser.displayName || 'Priyasha Priyal Jena',
+                role: 'admin',
+                authorId: 'priyasha-priyal-jena'
+              } : null}
+              currentUserRole={adminUser ? 'admin' : 'author'}
+              articles={articles}
+              contributors={contributors}
+              initialContributorId={dashboardContributorId}
+              onNavigateHome={() => {
+                setActiveTab('home');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              onSelectArticle={(art) => {
+                setSelectedArticle(art);
+                setActiveTab('article-view');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              onComposeNew={() => {
+                setActiveTab('submit-investigation');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            />
+          </div>
+        )}
+
+        {/* ══ VIEW: PUBLIC MANUSCRIPT & INVESTIGATION SUBMISSION PORTAL ══ */}
+        {activeTab === 'submit-investigation' && (
+          <ManuscriptSubmissionPortal 
+            onNavigateHome={() => {
+              setActiveTab('home');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
           />
@@ -1410,16 +1570,16 @@ export default function App() {
               
               {/* Image banner display */}
               {selectedArticle.featuredImage && !selectedArticle.canvaEmbed && (
-                <div className="w-full h-[220px] md:h-[400px] overflow-hidden rounded-sm border border-paper/10 mb-2 relative">
+                <div className="article-banner-container overflow-hidden rounded-sm border border-paper/10 mb-2 relative">
                   <img 
                     src={getOptimizedImageUrl(selectedArticle.featuredImage, 'banner')} 
                     alt={selectedArticle.title} 
-                    className="w-full h-full object-cover select-none"
+                    className="article-banner-img select-none"
                     referrerPolicy="no-referrer"
                     loading="lazy"
                     decoding="async"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-midnight/40 to-transparent" />
+                  <div className="article-banner-gradient absolute inset-0 pointer-events-none bg-gradient-to-t from-midnight/40 to-transparent" />
                 </div>
               )}
 
@@ -1508,33 +1668,16 @@ export default function App() {
                 </h2>
               )}
 
-              {/* Scholarly journal style double-rule author line with contributor bio link */}
-              <div className="border-y border-double border-paper/20 py-2.5 my-2 font-sans text-[10px] font-semibold tracking-[0.18em] uppercase text-paper/45 flex flex-wrap items-center justify-between gap-2">
-                <span>
-                  BY{' '}
-                  <button
-                    onClick={() => {
-                      setSelectedContributorId(selectedArticle.authorId || 'priyasha-priyal-jena');
-                      setActiveTab('contributors');
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                    className="text-paper hover:text-blood underline underline-offset-2 decoration-blood/60 transition-colors cursor-pointer"
-                    title="View Author Bio &amp; Published Research Papers"
-                  >
-                    {selectedArticle.authorName || 'Priyasha Priyal Jena'}
-                  </button>{' '}
-                  · {selectedArticle.authorId === 'priyasha-priyal-jena' || !selectedArticle.authorId ? 'FOUNDER & EDITOR-IN-CHIEF' : 'RESEARCH CONTRIBUTOR'} · THE OLIGARCHY
-                </span>
-                <button
-                  onClick={() => {
-                    setSelectedContributorId(selectedArticle.authorId || 'priyasha-priyal-jena');
+              {/* Scholarly journal style multi-author attribution banner */}
+              <div className="my-2">
+                <MultiAuthorAttribution 
+                  article={selectedArticle}
+                  onSelectContributor={(authorId) => {
+                    setSelectedContributorId(authorId);
                     setActiveTab('contributors');
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
-                  className="font-sans text-[9px] font-bold tracking-widest uppercase text-blood hover:text-blood-light flex items-center gap-1 cursor-pointer"
-                >
-                  Scholar Bio &amp; Papers &rarr;
-                </button>
+                />
               </div>
 
               {/* ARTICLE BODY OR RESPONSIVE CANVA ENGINE EMBED */}
@@ -1600,6 +1743,9 @@ export default function App() {
 
               {/* Related scholarly references citation index bibliography */}
               <SourcesSection sources={selectedArticle.sources || []} />
+
+              {/* Automated Citation Generator for Academics & Researchers */}
+              <CitationGenerator article={selectedArticle} />
 
               {/* Automated "Recommended for You" / Related Investigations Footer */}
               {relatedInvestigations.length > 0 && (
@@ -1731,6 +1877,7 @@ export default function App() {
         <Footer 
           setActiveTab={setActiveTab} 
           setCategoryFilter={setCategoryFilter} 
+          siteSettings={siteSettings}
         />
       )}
 

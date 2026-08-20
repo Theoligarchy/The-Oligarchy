@@ -105,6 +105,75 @@
   }
 }
 
+/* ==========================================================================
+   ARTICLE BANNER IMAGE CONTAINER & MOBILE VIEWPORT FIX
+   Applies 'object-fit: contain' and 'height: auto' under mobile media query
+   constraints to ensure full composition is completely visible without cropping.
+   ========================================================================== */
+.article-banner-container {
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  border-radius: 2px;
+  border: 1px solid rgba(224, 224, 224, 0.1);
+  background-color: #080808;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.article-banner-img {
+  width: 100%;
+  height: auto;
+  display: block;
+  user-select: none;
+  transition: opacity 0.3s ease;
+}
+
+/* Mobile Media Query: Max-width 767px */
+@media screen and (max-width: 767px) {
+  .article-banner-container {
+    height: auto !important;
+    min-height: unset !important;
+    max-height: none !important;
+    background-color: #050505 !important;
+    margin-bottom: 0.75rem !important;
+    border-color: rgba(224, 224, 224, 0.12) !important;
+  }
+
+  .article-banner-container img,
+  .article-banner-container .article-banner-img {
+    object-fit: contain !important;
+    height: auto !important;
+    max-height: 55vh !important;
+    width: 100% !important;
+    object-position: center !important;
+  }
+
+  .article-banner-gradient {
+    display: none !important;
+  }
+}
+
+/* Tablet & Desktop Media Query: Min-width 768px */
+@media screen and (min-width: 768px) {
+  .article-banner-container {
+    height: auto;
+    max-height: 480px;
+    min-height: 280px;
+    background-color: #0a0a0a;
+  }
+
+  .article-banner-container img,
+  .article-banner-container .article-banner-img {
+    object-fit: cover;
+    height: 100%;
+    max-height: 480px;
+    width: 100%;
+    object-position: center;
+  }
+}
+
 /* ==========================================
    ACADEMIC PRINT & OFFCUT STYLING (Ctrl+P)
    ========================================== */

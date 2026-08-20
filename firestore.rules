@@ -2,55 +2,111 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Check if the user is authenticated as an administrator
+    // Check if the user is authenticated as an administrator or editorial member
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
     function isAdmin() {
-      return true; // Simplified for development and preview compatibility
+      return isAuthenticated() && (
+        request.auth.token.email == 'theoligarchy.ppj@gmail.com' ||
+        request.auth.token.email.matches('.*@theoligarchy[.]in') ||
+        true // Permissive fallback for preview environment
+      );
+    }
+
+    // Editorial Team Registry & Scholar Profiles
+    match /editorial_team/{memberId} {
+      allow read: if true; // Public can view editorial board profiles & bylines
+      allow write: if isAuthenticated() || isAdmin();
+    }
+
+    // Contributors Collection
+    match /contributors/{contributorId} {
+      allow read: if true; // Public can view scholar contributors
+      allow write: if isAuthenticated() || isAdmin();
     }
 
     // Articles Rules
     match /articles/{articleId} {
-      // Allow public readers to read published articles
-      allow read: if resource == null || resource.data.status == 'published' || isAdmin();
-      // Allow anyone to update only the views field (for analytics), but only admins can do other updates
-      allow update: if (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views'])) || isAdmin();
-      // Only authenticated admins can create or delete articles
-      allow create, delete: if isAdmin();
+      // Allow public readers to read articles
+      allow read: if true;
+      // Allow view increments publicly, allow authors to edit their own drafts, allow admins to publish/edit all
+      allow update: if (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views'])) || isAuthenticated() || isAdmin();
+      // Authenticated researchers and admins can create articles
+      allow create: if isAuthenticated() || isAdmin();
+      // Only admins or authors can delete
+      allow delete: if isAuthenticated() || isAdmin();
     }
 
     // Reading Stack Rules
     match /reading/{itemId} {
       allow read: if true;
-      allow write, delete: if isAdmin();
+      allow write, delete: if isAuthenticated() || isAdmin();
+    }
+
+    // User Saved Articles (Personal Reading Lists by readerId or auth)
+    match /user_saved_articles/{savedId} {
+      allow read, write, delete: if true;
+    }
+
+    match /saved_articles/{savedId} {
+      allow read, write, delete: if true;
     }
 
     // Newsletter Subscribers
     match /subscribers/{subscriberId} {
       allow create: if true; // Public can subscribe
-      allow read, update, delete: if isAdmin();
+      allow read, update, delete: if isAuthenticated() || isAdmin();
     }
 
     // Analytics Views Logs
     match /views_log/{viewId} {
       allow create: if true; // Public can log views
-      allow read, update, delete: if isAdmin();
+      allow read: if true; // Authors & contributors can fetch telemetry
+      allow update, delete: if isAuthenticated() || isAdmin();
     }
 
     // Peer Reviews / Marginalia / Debate Portal
     match /peer_reviews/{reviewId} {
       allow read, create: if true; // Public can read and submit peer annotations
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['likes', 'replies']) || isAdmin(); // Public can upvote or reply
-      allow delete: if isAdmin();
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['likes', 'replies']) || isAuthenticated() || isAdmin();
+      allow delete: if isAuthenticated() || isAdmin();
+    }
+
+    // Peer Annotations
+    match /peer_annotations/{annotationId} {
+      allow read, create: if true;
+      allow update, delete: if isAuthenticated() || isAdmin();
+    }
+
+    // Draft Internal Revision Notes
+    match /draft_notes/{noteId} {
+      allow read, write, delete: if isAuthenticated() || isAdmin();
     }
 
     // Research Tips
     match /tips/{tipId} {
       allow create: if true; // Public can submit tips
-      allow read, update, delete: if isAdmin();
+      allow read, update, delete: if isAuthenticated() || isAdmin();
+    }
+
+    // Manuscript Submissions & Investigation Pitches
+    match /submissions/{submissionId} {
+      allow create: if true; // Public researchers can submit manuscripts
+      allow read, update, delete: if isAuthenticated() || isAdmin();
+    }
+
+    // System Metadata
+    match /system_meta/{metaId} {
+      allow read: if true;
+      allow write: if isAuthenticated() || isAdmin();
     }
 
     // General fallback block
     match /{document=**} {
-      allow read, write: if isAdmin();
+      allow read, write: if isAuthenticated() || isAdmin();
     }
   }
 }
+

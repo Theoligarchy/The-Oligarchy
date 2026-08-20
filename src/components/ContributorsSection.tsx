@@ -8,22 +8,25 @@ import {
   Twitter, 
   Linkedin, 
   Mail, 
+  Globe,
   ExternalLink, 
   X, 
-  ArrowRight,
-  Sparkles,
-  Search,
-  FileText,
-  Calendar,
-  Clock,
-  ChevronRight,
-  ShieldCheck,
-  Eye,
-  Activity,
-  TrendingUp,
-  BarChart2,
-  Compass,
-  Layers
+  ArrowRight, 
+  Sparkles, 
+  Search, 
+  FileText, 
+  Calendar, 
+  Clock, 
+  ChevronRight, 
+  ShieldCheck, 
+  Eye, 
+  Activity, 
+  TrendingUp, 
+  BarChart2, 
+  Compass, 
+  Layers,
+  Filter,
+  CheckCircle2
 } from 'lucide-react';
 import { 
   Radar, 
@@ -38,24 +41,188 @@ import { Article, AuthorProfile } from '../types';
 import { SOCIAL_LINKS } from './Footer';
 import { motion, AnimatePresence } from 'motion/react';
 import { getOptimizedImageUrl } from '../utils/imageOptimizer';
+import { normalizeOrcid, getOrcidUrl } from '../utils/citationEngine';
 
-// Default Founder Profile
+/**
+ * Normalizes author social / academic portfolio URLs to ensure valid external linking
+ */
+export function normalizeSocialUrl(
+  platform: 'linkedin' | 'twitter' | 'instagram' | 'website' | 'email' | 'googleScholar' | 'researchGate' | 'ssrn', 
+  value?: string
+): string | null {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (platform === 'email') {
+    return trimmed.startsWith('mailto:') ? trimmed : `mailto:${trimmed}`;
+  }
+
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+
+  // Handle bare domain or handle prefixes
+  if (platform === 'twitter') {
+    const handle = trimmed.replace(/^@/, '').replace(/^(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\//i, '');
+    return `https://x.com/${handle}`;
+  }
+
+  if (platform === 'linkedin') {
+    const clean = trimmed.replace(/^(?:https?:\/\/)?(?:www\.)?linkedin\.com\/(?:in\/)?/i, '').replace(/^in\//i, '');
+    if (clean.includes('/')) return `https://www.linkedin.com/${clean}`;
+    return `https://www.linkedin.com/in/${clean}`;
+  }
+
+  if (platform === 'instagram') {
+    const handle = trimmed.replace(/^@/, '').replace(/^(?:https?:\/\/)?(?:www\.)?instagram\.com\//i, '');
+    return `https://instagram.com/${handle}`;
+  }
+
+  if (platform === 'website' || platform === 'googleScholar' || platform === 'researchGate' || platform === 'ssrn') {
+    return `https://${trimmed}`;
+  }
+
+  return trimmed;
+}
+
+// Default Founder Profile (The single real founder profile)
 export const DEFAULT_FOUNDER_PROFILE: AuthorProfile = {
   id: 'priyasha-priyal-jena',
   name: 'Priyasha Priyal Jena',
   role: 'Founder & Editor-in-Chief',
-  institution: 'The Oligarchy Research Group',
+  institution: 'The Oligarchy',
+  credentials: 'Founder & Editor-in-Chief',
   bio: 'Founder and Editor of The Oligarchy, an independent research publication exploring crime, psychology, politics, and systems of power. Founded at 19, the project began as an attempt to understand why people, institutions, and societies behave the way they do. The publication prioritises understanding before judgment and research before outrage.',
+  researchAreas: ['Forensic Criminology', 'Behavioral Psyche', 'Power Systems', 'Corporate Fraud'],
+  affiliations: ['The Oligarchy'],
   tags: ['Criminology', 'Behavioral Psyche', 'Corporate Fraud', 'Systems of Power', 'Institutional Behavior'],
   socials: {
     instagram: SOCIAL_LINKS.instagram,
     twitter: SOCIAL_LINKS.twitter,
     linkedin: SOCIAL_LINKS.linkedinPersonal,
-    website: 'https://theoligarchy.in'
+    email: 'theoligarchy.ppj@gmail.com'
   },
+  email: 'theoligarchy.ppj@gmail.com',
   isFounder: true,
   joinedDate: '2024'
 };
+
+// Default Board of Contributors — only real founder profile
+export const DEFAULT_BOARD_CONTRIBUTORS: AuthorProfile[] = [
+  DEFAULT_FOUNDER_PROFILE
+];
+
+export interface ResolvedSocialLinks {
+  linkedinUrl: string | null;
+  twitterUrl: string | null;
+  portfolioUrl: string | null;
+  googleScholarUrl: string | null;
+  researchGateUrl: string | null;
+  ssrnUrl: string | null;
+  instagramUrl: string | null;
+  emailUrl: string | null;
+  orcidUrl: string | null;
+  normalizedOrcid: string | null;
+  hasAnySocial: boolean;
+}
+
+/**
+ * Resolves and extracts all social, professional, and academic portfolio links
+ * across varied author profile schemas, flat keys, and nested objects.
+ */
+export function resolveAuthorSocialLinks(profile: Partial<AuthorProfile> & Record<string, any>): ResolvedSocialLinks {
+  if (!profile) {
+    return {
+      linkedinUrl: null,
+      twitterUrl: null,
+      portfolioUrl: null,
+      googleScholarUrl: null,
+      researchGateUrl: null,
+      ssrnUrl: null,
+      instagramUrl: null,
+      emailUrl: null,
+      orcidUrl: null,
+      normalizedOrcid: null,
+      hasAnySocial: false
+    };
+  }
+
+  const socials = profile.socials || {};
+
+  // 1. LinkedIn resolution
+  let rawLinkedin = socials.linkedin || profile.linkedin || profile.linkedinUrl;
+  
+  // 2. Twitter / X resolution
+  let rawTwitter = socials.twitter || profile.twitter || profile.twitterUrl || profile.x || profile.xUrl;
+  
+  // 3. Academic Portfolio / Personal Website resolution
+  let rawPortfolio = socials.website || profile.website || profile.portfolio || profile.portfolioUrl || profile.academicPortfolio || profile.profileUrl;
+  
+  // 4. Google Scholar resolution
+  let rawScholar = socials.googleScholar || profile.googleScholar || profile.scholarUrl;
+  
+  // 5. ResearchGate resolution
+  let rawResearchGate = socials.researchGate || profile.researchGate;
+  
+  // 6. SSRN resolution
+  let rawSsrn = socials.ssrn || profile.ssrn;
+  
+  // 7. Instagram resolution
+  let rawInstagram = socials.instagram || profile.instagram || profile.instagramUrl;
+  
+  // 8. Generic authorSocialUrl parsing (e.g. from manuscript submission or editorial author records)
+  const genericSocial = profile.authorSocialUrl || profile.socialUrl;
+  if (genericSocial && typeof genericSocial === 'string') {
+    const s = genericSocial.trim().toLowerCase();
+    if (s.includes('linkedin.com') && !rawLinkedin) {
+      rawLinkedin = genericSocial;
+    } else if ((s.includes('twitter.com') || s.includes('x.com')) && !rawTwitter) {
+      rawTwitter = genericSocial;
+    } else if (s.includes('scholar.google') && !rawScholar) {
+      rawScholar = genericSocial;
+    } else if (s.includes('researchgate.net') && !rawResearchGate) {
+      rawResearchGate = genericSocial;
+    } else if (s.includes('ssrn.com') && !rawSsrn) {
+      rawSsrn = genericSocial;
+    } else if (s.includes('instagram.com') && !rawInstagram) {
+      rawInstagram = genericSocial;
+    } else if (!rawPortfolio && (s.startsWith('http://') || s.startsWith('https://') || s.includes('.'))) {
+      rawPortfolio = genericSocial;
+    }
+  }
+
+  const linkedinUrl = normalizeSocialUrl('linkedin', rawLinkedin);
+  const twitterUrl = normalizeSocialUrl('twitter', rawTwitter);
+  const portfolioUrl = normalizeSocialUrl('website', rawPortfolio);
+  const googleScholarUrl = normalizeSocialUrl('googleScholar', rawScholar);
+  const researchGateUrl = normalizeSocialUrl('researchGate', rawResearchGate);
+  const ssrnUrl = normalizeSocialUrl('ssrn', rawSsrn);
+  const instagramUrl = normalizeSocialUrl('instagram', rawInstagram);
+  const emailUrl = normalizeSocialUrl('email', profile.email || (socials as Record<string, any>)?.email);
+  const orcid = profile.orcid || profile.authorOrcid;
+  const orcidUrl = getOrcidUrl(orcid);
+  const normalizedOrcid = normalizeOrcid(orcid);
+
+  const hasAnySocial = Boolean(
+    linkedinUrl || twitterUrl || portfolioUrl || googleScholarUrl || 
+    researchGateUrl || ssrnUrl || instagramUrl || emailUrl || orcidUrl
+  );
+
+  return {
+    linkedinUrl,
+    twitterUrl,
+    portfolioUrl,
+    googleScholarUrl,
+    researchGateUrl,
+    ssrnUrl,
+    instagramUrl,
+    emailUrl,
+    orcidUrl,
+    normalizedOrcid,
+    hasAnySocial
+  };
+}
 
 export interface AuthorStats {
   totalArticles: number;
@@ -223,11 +390,332 @@ function AuthorAcademicRadar({ data, authorName }: { data: { subject: string; va
   );
 }
 
+/**
+ * Clickable social & academic portfolio icon strip for contributor card
+ */
+function ContributorCardSocialIcons({ 
+  profile,
+  socials, 
+  email,
+  authorName,
+  orcid
+}: { 
+  profile?: Partial<AuthorProfile> & Record<string, any>;
+  socials?: AuthorProfile['socials']; 
+  email?: string;
+  authorName?: string;
+  orcid?: string;
+}) {
+  const mergedProfile = profile || { socials, email, name: authorName, orcid };
+  const name = profile?.name || authorName || 'Contributor';
+  const resolved = resolveAuthorSocialLinks(mergedProfile);
+
+  if (!resolved.hasAnySocial) {
+    return (
+      <span className="font-sans text-[9px] text-paper/30 italic">
+        Public channels available on request
+      </span>
+    );
+  }
+
+  return (
+    <div 
+      className="flex flex-wrap items-center gap-1.5" 
+      onClick={(e) => e.stopPropagation()}
+      aria-label={`Social & Academic profiles for ${name}`}
+    >
+      {/* 1. LinkedIn */}
+      {resolved.linkedinUrl && (
+        <a
+          href={resolved.linkedinUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="w-7 h-7 flex items-center justify-center rounded-sm bg-black/40 border border-paper/15 text-paper/60 hover:text-white hover:bg-[#0a66c2] hover:border-[#0a66c2] transition-all duration-200 shadow-xs group focus:outline-hidden focus:ring-1 focus:ring-[#0a66c2]"
+          title={`${name}'s LinkedIn Profile`}
+          aria-label={`${name}'s LinkedIn Profile`}
+        >
+          <Linkedin size={13} className="group-hover:text-white transition-colors" />
+        </a>
+      )}
+
+      {/* 2. Twitter / X */}
+      {resolved.twitterUrl && (
+        <a
+          href={resolved.twitterUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="w-7 h-7 flex items-center justify-center rounded-sm bg-black/40 border border-paper/15 text-paper/60 hover:text-white hover:bg-black hover:border-paper/50 transition-all duration-200 shadow-xs group focus:outline-hidden focus:ring-1 focus:ring-paper"
+          title={`${name}'s Twitter / X Profile`}
+          aria-label={`${name}'s Twitter / X Profile`}
+        >
+          {/* Custom X / Twitter logo */}
+          <svg className="w-3 h-3 fill-current group-hover:text-white transition-colors" viewBox="0 0 24 24">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+          </svg>
+        </a>
+      )}
+
+      {/* 3. Academic Portfolio / Personal Website */}
+      {resolved.portfolioUrl && (
+        <a
+          href={resolved.portfolioUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="w-7 h-7 flex items-center justify-center rounded-sm bg-black/40 border border-paper/15 text-paper/60 hover:text-white hover:bg-blood hover:border-blood transition-all duration-200 shadow-xs group focus:outline-hidden focus:ring-1 focus:ring-blood"
+          title={`${name}'s Academic Portfolio & Institutional Website`}
+          aria-label={`${name}'s Academic Portfolio & Institutional Website`}
+        >
+          <Globe size={13} className="group-hover:text-white transition-colors" />
+        </a>
+      )}
+
+      {/* 4. Google Scholar Citations */}
+      {resolved.googleScholarUrl && (
+        <a
+          href={resolved.googleScholarUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="w-7 h-7 flex items-center justify-center rounded-sm bg-black/40 border border-paper/15 text-paper/60 hover:text-amber-200 hover:bg-amber-600/30 hover:border-amber-400/60 transition-all duration-200 shadow-xs group focus:outline-hidden focus:ring-1 focus:ring-amber-400"
+          title={`${name}'s Google Scholar Citations`}
+          aria-label={`${name}'s Google Scholar Citations`}
+        >
+          <GraduationCap size={13} className="group-hover:text-amber-300 transition-colors" />
+        </a>
+      )}
+
+      {/* 5. ResearchGate Profile */}
+      {resolved.researchGateUrl && (
+        <a
+          href={resolved.researchGateUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="w-7 h-7 flex items-center justify-center rounded-sm bg-black/40 border border-paper/15 text-paper/60 hover:text-white hover:bg-[#00ccbb]/40 hover:border-[#00ccbb] transition-all duration-200 shadow-xs group focus:outline-hidden focus:ring-1 focus:ring-[#00ccbb]"
+          title={`${name}'s ResearchGate Profile`}
+          aria-label={`${name}'s ResearchGate Profile`}
+        >
+          <BookOpen size={13} className="group-hover:text-[#00ccbb] transition-colors" />
+        </a>
+      )}
+
+      {/* 6. SSRN Research Library */}
+      {resolved.ssrnUrl && (
+        <a
+          href={resolved.ssrnUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="w-7 h-7 flex items-center justify-center rounded-sm bg-black/40 border border-paper/15 text-paper/60 hover:text-white hover:bg-blood/40 hover:border-blood transition-all duration-200 shadow-xs group focus:outline-hidden focus:ring-1 focus:ring-blood"
+          title={`${name}'s SSRN Library`}
+          aria-label={`${name}'s SSRN Library`}
+        >
+          <FileText size={13} className="group-hover:text-blood-light transition-colors" />
+        </a>
+      )}
+
+      {/* 7. Verified ORCID Badge */}
+      {resolved.orcidUrl && (
+        <a
+          href={resolved.orcidUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="h-7 px-2 flex items-center gap-1 rounded-sm bg-[#a6ce39]/10 border border-[#a6ce39]/30 text-[#a6ce39] hover:bg-[#a6ce39]/25 hover:text-[#c4ea4f] hover:border-[#a6ce39]/60 transition-all duration-200 shadow-xs font-mono text-[9px] font-bold focus:outline-hidden focus:ring-1 focus:ring-[#a6ce39]"
+          title={`Verified ORCID iD: ${resolved.normalizedOrcid}`}
+          aria-label={`${name}'s Verified ORCID Profile`}
+        >
+          <svg className="w-3 h-3 shrink-0" viewBox="0 0 256 256" fill="currentColor">
+            <path d="M128,0A128,128,0,1,0,256,128,128,128,0,0,0,128,0ZM86.37,186.25H60.08V73.49h26.29Zm-13.14-126a15.35,15.35,0,1,1,15.35-15.35A15.35,15.35,0,0,1,73.23,60.25Zm122.9,91.8c0,22.25-17.75,34.2-46.7,34.2H109.84V73.49h40.35c27.1,0,45.94,14.65,45.94,37.35,0,13.79-8.4,26.47-21.75,32.32C188.08,128.51,196.13,140.48,196.13,152.05Zm-26.65,0c0-12.87-9.5-20.7-25.55-20.7H133.72v41.4h10.21C159.98,172.75,169.48,164.92,169.48,152.05Zm-4.9-46.35c0-11.45-8.5-18.4-22.75-18.4H133.72v36.8h8.11C156.08,124.1,164.58,117.15,164.58,105.7Z"/>
+          </svg>
+          <span className="font-mono">ORCID</span>
+        </a>
+      )}
+
+      {/* 8. Instagram */}
+      {resolved.instagramUrl && (
+        <a
+          href={resolved.instagramUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="w-7 h-7 flex items-center justify-center rounded-sm bg-black/40 border border-paper/15 text-paper/60 hover:text-white hover:bg-[#e1306c]/40 hover:border-[#e1306c] transition-all duration-200 shadow-xs group focus:outline-hidden focus:ring-1 focus:ring-[#e1306c]"
+          title={`${name}'s Instagram Profile`}
+          aria-label={`${name}'s Instagram Profile`}
+        >
+          <Instagram size={13} className="group-hover:text-[#e1306c] transition-colors" />
+        </a>
+      )}
+
+      {/* 9. Institutional Email */}
+      {resolved.emailUrl && (
+        <a
+          href={resolved.emailUrl}
+          onClick={(e) => e.stopPropagation()}
+          className="w-7 h-7 flex items-center justify-center rounded-sm bg-black/40 border border-paper/15 text-paper/60 hover:text-amber-200 hover:bg-amber-500/20 hover:border-amber-400/50 transition-all duration-200 shadow-xs group focus:outline-hidden focus:ring-1 focus:ring-amber-400"
+          title={`Institutional Contact: ${name}`}
+          aria-label={`Institutional Contact: ${name}`}
+        >
+          <Mail size={13} className="group-hover:text-amber-300 transition-colors" />
+        </a>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Clickable badges with full labels for contributor profile modal
+ */
+function ContributorModalSocialBadges({ 
+  profile,
+  socials, 
+  email,
+  authorName,
+  orcid
+}: { 
+  profile?: Partial<AuthorProfile> & Record<string, any>;
+  socials?: AuthorProfile['socials']; 
+  email?: string;
+  authorName?: string;
+  orcid?: string;
+}) {
+  const mergedProfile = profile || { socials, email, name: authorName, orcid };
+  const resolved = resolveAuthorSocialLinks(mergedProfile);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 mt-3">
+      {resolved.orcidUrl && (
+        <a 
+          href={resolved.orcidUrl} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="font-mono text-[10px] font-bold text-[#a6ce39] hover:text-[#b8e046] bg-[#a6ce39]/10 hover:bg-[#a6ce39]/20 border border-[#a6ce39]/40 px-3 py-1.5 rounded-xs flex items-center gap-1.5 transition-all shadow-sm group"
+          title={`Verified ORCID Profile: ${resolved.normalizedOrcid}`}
+        >
+          <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 256 256" fill="currentColor">
+            <path d="M128,0A128,128,0,1,0,256,128,128,128,0,0,0,128,0ZM86.37,186.25H60.08V73.49h26.29Zm-13.14-126a15.35,15.35,0,1,1,15.35-15.35A15.35,15.35,0,0,1,73.23,60.25Zm122.9,91.8c0,22.25-17.75,34.2-46.7,34.2H109.84V73.49h40.35c27.1,0,45.94,14.65,45.94,37.35,0,13.79-8.4,26.47-21.75,32.32C188.08,128.51,196.13,140.48,196.13,152.05Zm-26.65,0c0-12.87-9.5-20.7-25.55-20.7H133.72v41.4h10.21C159.98,172.75,169.48,164.92,169.48,152.05Zm-4.9-46.35c0-11.45-8.5-18.4-22.75-18.4H133.72v36.8h8.11C156.08,124.1,164.58,117.15,164.58,105.7Z"/>
+          </svg>
+          <span>ORCID: {resolved.normalizedOrcid}</span>
+          <ExternalLink size={10} className="text-[#a6ce39]/60 group-hover:text-[#b8e046] transition-colors" />
+        </a>
+      )}
+
+      {resolved.googleScholarUrl && (
+        <a 
+          href={resolved.googleScholarUrl} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="font-sans text-[10px] font-semibold text-paper/85 hover:text-paper bg-navy hover:bg-amber-500/20 border border-amber-400/30 hover:border-amber-400 px-3 py-1.5 rounded-xs flex items-center gap-1.5 transition-all shadow-sm group"
+        >
+          <GraduationCap size={12} className="text-amber-400 group-hover:text-amber-300 transition-colors" />
+          <span>Google Scholar</span>
+          <ExternalLink size={10} className="text-paper/40 group-hover:text-paper transition-colors" />
+        </a>
+      )}
+
+      {resolved.researchGateUrl && (
+        <a 
+          href={resolved.researchGateUrl} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="font-sans text-[10px] font-semibold text-paper/85 hover:text-paper bg-navy hover:bg-[#00ccbb]/20 border border-[#00ccbb]/30 hover:border-[#00ccbb] px-3 py-1.5 rounded-xs flex items-center gap-1.5 transition-all shadow-sm group"
+        >
+          <BookOpen size={12} className="text-[#00ccbb] group-hover:text-paper transition-colors" />
+          <span>ResearchGate</span>
+          <ExternalLink size={10} className="text-paper/40 group-hover:text-paper transition-colors" />
+        </a>
+      )}
+
+      {resolved.ssrnUrl && (
+        <a 
+          href={resolved.ssrnUrl} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="font-sans text-[10px] font-semibold text-paper/85 hover:text-paper bg-navy hover:bg-blood/20 border border-paper/15 hover:border-blood px-3 py-1.5 rounded-xs flex items-center gap-1.5 transition-all shadow-sm group"
+        >
+          <FileText size={12} className="text-blood-light group-hover:text-paper transition-colors" />
+          <span>SSRN Library</span>
+          <ExternalLink size={10} className="text-paper/40 group-hover:text-paper transition-colors" />
+        </a>
+      )}
+
+      {resolved.linkedinUrl && (
+        <a 
+          href={resolved.linkedinUrl} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="font-sans text-[10px] font-semibold text-paper/85 hover:text-paper bg-navy hover:bg-[#0a66c2]/20 border border-[#0a66c2]/30 hover:border-[#0a66c2] px-3 py-1.5 rounded-xs flex items-center gap-1.5 transition-all shadow-sm group"
+        >
+          <Linkedin size={12} className="text-[#0a66c2] group-hover:text-paper transition-colors" />
+          <span>LinkedIn</span>
+          <ExternalLink size={10} className="text-paper/40 group-hover:text-paper transition-colors" />
+        </a>
+      )}
+
+      {resolved.twitterUrl && (
+        <a 
+          href={resolved.twitterUrl} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="font-sans text-[10px] font-semibold text-paper/85 hover:text-paper bg-navy hover:bg-white/10 border border-paper/20 hover:border-paper px-3 py-1.5 rounded-xs flex items-center gap-1.5 transition-all shadow-sm group"
+        >
+          <svg className="w-3 h-3 fill-current text-[#1da1f2] group-hover:text-white transition-colors" viewBox="0 0 24 24">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+          </svg>
+          <span>Twitter / X</span>
+          <ExternalLink size={10} className="text-paper/40 group-hover:text-paper transition-colors" />
+        </a>
+      )}
+
+      {resolved.portfolioUrl && (
+        <a 
+          href={resolved.portfolioUrl} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="font-sans text-[10px] font-semibold text-paper/85 hover:text-paper bg-navy hover:bg-blood/20 border border-blood/30 hover:border-blood px-3 py-1.5 rounded-xs flex items-center gap-1.5 transition-all shadow-sm group"
+        >
+          <Globe size={12} className="text-blood-light group-hover:text-paper transition-colors" />
+          <span>Academic Portfolio</span>
+          <ExternalLink size={10} className="text-paper/40 group-hover:text-paper transition-colors" />
+        </a>
+      )}
+
+      {resolved.instagramUrl && (
+        <a 
+          href={resolved.instagramUrl} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="font-sans text-[10px] font-semibold text-paper/85 hover:text-paper bg-navy hover:bg-[#e1306c]/20 border border-[#e1306c]/30 hover:border-[#e1306c] px-3 py-1.5 rounded-xs flex items-center gap-1.5 transition-all shadow-sm group"
+        >
+          <Instagram size={12} className="text-[#e1306c] group-hover:text-paper transition-colors" />
+          <span>Instagram</span>
+          <ExternalLink size={10} className="text-paper/40 group-hover:text-paper transition-colors" />
+        </a>
+      )}
+
+      {resolved.emailUrl && (
+        <a 
+          href={resolved.emailUrl} 
+          className="font-sans text-[10px] font-semibold text-paper/85 hover:text-paper bg-navy hover:bg-amber-500/20 border border-amber-400/30 hover:border-amber-400 px-3 py-1.5 rounded-xs flex items-center gap-1.5 transition-all shadow-sm group"
+        >
+          <Mail size={12} className="text-amber-400 group-hover:text-paper transition-colors" />
+          <span>Institutional Contact</span>
+        </a>
+      )}
+    </div>
+  );
+}
+
 interface ContributorsSectionProps {
   articles: Article[];
   contributors?: AuthorProfile[];
   onSelectArticle: (article: Article) => void;
   onOpenContact: () => void;
+  onOpenSubmitInvestigation?: () => void;
+  onOpenContributorDashboard?: (contributorId: string) => void;
   selectedContributorId?: string | null;
   onCloseContributorModal?: () => void;
 }
@@ -237,21 +725,30 @@ export default function ContributorsSection({
   contributors = [],
   onSelectArticle,
   onOpenContact,
+  onOpenSubmitInvestigation,
+  onOpenContributorDashboard,
   selectedContributorId,
   onCloseContributorModal
 }: ContributorsSectionProps) {
-  const [allContributors, setAllContributors] = useState<AuthorProfile[]>([DEFAULT_FOUNDER_PROFILE]);
+  const [allContributors, setAllContributors] = useState<AuthorProfile[]>(DEFAULT_BOARD_CONTRIBUTORS);
   const [activeContributor, setActiveContributor] = useState<AuthorProfile | null>(null);
 
   useEffect(() => {
-    // Merge provided contributors with founder, ensuring no duplicate IDs
-    const list = [DEFAULT_FOUNDER_PROFILE];
+    // Merge provided contributors with default board contributors, ensuring no duplicate IDs
+    const list = [...DEFAULT_BOARD_CONTRIBUTORS];
     contributors.forEach(c => {
-      if (!list.some(item => item.id === c.id || item.name.toLowerCase() === c.name.toLowerCase())) {
+      const existingIdx = list.findIndex(
+        item => item.id === c.id || item.name.toLowerCase() === c.name.toLowerCase()
+      );
+      if (existingIdx >= 0) {
+        list[existingIdx] = { ...list[existingIdx], ...c };
+      } else {
         list.push(c);
       }
     });
-    setAllContributors(list);
+    // Filter only visible contributors for public presentation (defaults to true)
+    const visibleList = list.filter(c => c.isVisible !== false);
+    setAllContributors(visibleList);
   }, [contributors]);
 
   // Handle external modal trigger by selectedContributorId
@@ -291,17 +788,23 @@ export default function ContributorsSection({
     }
   };
 
-  // Helper to filter published articles by a contributor
+  // Helper to filter published articles by a contributor (primary author or co-author)
   const getContributorArticles = (profile: AuthorProfile) => {
     return articles.filter(a => {
       if (a.status !== 'published') return false;
       const matchId = a.authorId && a.authorId.toLowerCase() === profile.id.toLowerCase();
       const matchName = a.authorName && a.authorName.toLowerCase() === profile.name.toLowerCase();
+      
+      // Also match if listed as a co-author
+      const matchCoAuthor = Array.isArray(a.coAuthors) && a.coAuthors.some(
+        ca => ca.name && ca.name.toLowerCase() === profile.name.toLowerCase()
+      );
+
       // If founder, also match articles authored by default
       if (profile.isFounder && (!a.authorName || a.authorName.toLowerCase().includes('priyasha'))) {
         return true;
       }
-      return matchId || matchName;
+      return matchId || matchName || matchCoAuthor;
     });
   };
 
@@ -400,6 +903,11 @@ export default function ContributorsSection({
                       <p className="font-sans text-[10px] font-bold tracking-wider uppercase text-blood mt-0.5">
                         {profile.role}
                       </p>
+                      {profile.credentials && (
+                        <span className="font-mono text-[9px] text-amber-300/90 font-medium bg-amber-500/10 border border-amber-400/20 px-1.5 py-0.2 rounded-xs inline-block mt-0.5">
+                          {profile.credentials}
+                        </span>
+                      )}
                       {profile.institution && (
                         <p className="font-serif text-xs text-paper/40 italic mt-0.5">
                           {profile.institution}
@@ -450,10 +958,10 @@ export default function ContributorsSection({
                   {profile.bio}
                 </p>
 
-                {/* Research Focus Tags */}
-                {profile.tags && profile.tags.length > 0 && (
+                {/* Research Focus & Areas Tags */}
+                {((profile.researchAreas && profile.researchAreas.length > 0) || (profile.tags && profile.tags.length > 0)) && (
                   <div className="flex flex-wrap gap-1.5 mb-6">
-                    {profile.tags.map(tag => (
+                    {(profile.researchAreas || profile.tags || []).slice(0, 5).map(tag => (
                       <span 
                         key={tag}
                         className="font-sans text-[8px] font-semibold tracking-wider uppercase bg-paper/5 border border-paper/10 text-paper/50 px-2.5 py-1 rounded-xs"
@@ -467,45 +975,17 @@ export default function ContributorsSection({
 
               {/* Card Footer Action */}
               <div className="pt-4 border-t border-paper/10 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-2">
-                  {profile.socials?.instagram && (
-                    <a 
-                      href={profile.socials.instagram} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-paper/40 hover:text-blood transition-colors p-1"
-                      title="Instagram Profile"
-                    >
-                      <Instagram size={14} />
-                    </a>
-                  )}
-                  {profile.socials?.twitter && (
-                    <a 
-                      href={profile.socials.twitter} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-paper/40 hover:text-blood transition-colors p-1"
-                      title="Twitter / X Profile"
-                    >
-                      <Twitter size={14} />
-                    </a>
-                  )}
-                  {profile.socials?.linkedin && (
-                    <a 
-                      href={profile.socials.linkedin} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-paper/40 hover:text-blood transition-colors p-1"
-                      title="LinkedIn Profile"
-                    >
-                      <Linkedin size={14} />
-                    </a>
-                  )}
-                </div>
+                <ContributorCardSocialIcons 
+                  profile={profile}
+                  socials={profile.socials} 
+                  email={profile.email} 
+                  authorName={profile.name} 
+                  orcid={profile.orcid}
+                />
 
                 <button
                   onClick={() => setActiveContributor(profile)}
-                  className="font-sans text-[10px] font-bold tracking-widest uppercase bg-blood/10 hover:bg-blood border border-blood/30 hover:border-blood text-paper/90 hover:text-paper py-2 px-4 rounded-sm flex items-center gap-1.5 transition-all cursor-pointer"
+                  className="font-sans text-[10px] font-bold tracking-widest uppercase bg-blood/10 hover:bg-blood border border-blood/30 hover:border-blood text-paper/90 hover:text-paper py-2 px-4 rounded-sm flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
                 >
                   <Activity size={12} className="text-blood-light" />
                   Stats &amp; Papers
@@ -567,15 +1047,23 @@ export default function ContributorsSection({
           </div>
 
           <div className="flex flex-wrap items-center gap-4">
+            {onOpenSubmitInvestigation ? (
+              <button
+                onClick={onOpenSubmitInvestigation}
+                className="bg-blood hover:bg-blood-light text-paper font-sans text-[11px] font-bold tracking-widest uppercase py-3.5 px-7 rounded-sm flex items-center gap-2 transition-all cursor-pointer shadow-lg"
+              >
+                ✍️ Submit an Investigation / Manuscript
+                <ArrowRight size={14} />
+              </button>
+            ) : null}
             <button
               onClick={onOpenContact}
-              className="bg-blood hover:bg-blood-light text-paper font-sans text-[11px] font-bold tracking-widest uppercase py-3 px-6 rounded-sm flex items-center gap-2 transition-all cursor-pointer shadow-lg"
+              className="bg-navy hover:bg-navy/80 text-paper/80 hover:text-paper border border-paper/20 hover:border-paper/40 font-sans text-[11px] font-bold tracking-widest uppercase py-3.5 px-6 rounded-sm flex items-center gap-2 transition-all cursor-pointer"
             >
-              Submit Research Proposal / Apply
-              <ArrowRight size={14} />
+              Contact Editorial Board
             </button>
             <span className="font-serif text-xs italic text-paper/40">
-              Co-authorship and guest scholar opportunities available.
+              Open to criminologists, psychologists, and political researchers.
             </span>
           </div>
         </div>
@@ -633,59 +1121,67 @@ export default function ContributorsSection({
                       )}
                     </div>
 
-                    <p className="font-sans text-xs font-bold tracking-widest uppercase text-blood mt-1">
-                      {activeContributor.role}
-                    </p>
+                    <div className="flex items-center gap-2 flex-wrap mt-1">
+                      <p className="font-sans text-xs font-bold tracking-widest uppercase text-blood">
+                        {activeContributor.role}
+                      </p>
+                      {activeContributor.credentials && (
+                        <span className="font-mono text-[10px] text-amber-300 bg-amber-500/10 border border-amber-400/30 px-2 py-0.5 rounded-xs font-semibold">
+                          {activeContributor.credentials}
+                        </span>
+                      )}
+                    </div>
 
                     {activeContributor.institution && (
-                      <p className="font-serif text-sm text-paper/50 italic mt-0.5 flex items-center gap-1.5">
-                        <GraduationCap size={14} className="text-blood-light" />
+                      <p className="font-serif text-sm text-paper/70 italic mt-1 flex items-center gap-1.5">
+                        <GraduationCap size={14} className="text-blood-light shrink-0" />
                         {activeContributor.institution}
                       </p>
                     )}
 
-                    {/* Social Links Bar */}
-                    <div className="flex items-center gap-3 mt-3">
-                      {activeContributor.socials?.instagram && (
-                        <a 
-                          href={activeContributor.socials.instagram} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="font-sans text-[10px] font-semibold text-paper/60 hover:text-paper bg-navy border border-paper/10 hover:border-blood px-2.5 py-1 rounded-xs flex items-center gap-1 transition-colors"
-                        >
-                          <Instagram size={11} /> Instagram
-                        </a>
-                      )}
-                      {activeContributor.socials?.twitter && (
-                        <a 
-                          href={activeContributor.socials.twitter} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="font-sans text-[10px] font-semibold text-paper/60 hover:text-paper bg-navy border border-paper/10 hover:border-blood px-2.5 py-1 rounded-xs flex items-center gap-1 transition-colors"
-                        >
-                          <Twitter size={11} /> Twitter
-                        </a>
-                      )}
-                      {activeContributor.socials?.linkedin && (
-                        <a 
-                          href={activeContributor.socials.linkedin} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="font-sans text-[10px] font-semibold text-paper/60 hover:text-paper bg-navy border border-paper/10 hover:border-blood px-2.5 py-1 rounded-xs flex items-center gap-1 transition-colors"
-                        >
-                          <Linkedin size={11} /> LinkedIn
-                        </a>
-                      )}
-                    </div>
+                    {activeContributor.affiliations && activeContributor.affiliations.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                        <span className="font-sans text-[9px] uppercase tracking-wider text-paper/40 font-semibold">Affiliations:</span>
+                        {activeContributor.affiliations.map(aff => (
+                          <span key={aff} className="font-sans text-[9px] bg-paper/5 border border-paper/10 text-paper/70 px-2 py-0.5 rounded-xs">
+                            {aff}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Social & Academic Channels Bar */}
+                    <ContributorModalSocialBadges 
+                      profile={activeContributor}
+                      socials={activeContributor.socials} 
+                      email={activeContributor.email} 
+                      authorName={activeContributor.name} 
+                      orcid={activeContributor.orcid}
+                    />
                   </div>
                 </div>
 
                 {/* Key Scholarly Statistics Summary Cards */}
                 <div className="py-6 border-b border-paper/10">
-                  <h3 className="font-sans text-[10px] font-bold tracking-[0.2em] uppercase text-blood mb-3 flex items-center gap-1.5">
-                    <BarChart2 size={13} />
-                    Scholar Research Statistics
-                  </h3>
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <h3 className="font-sans text-[10px] font-bold tracking-[0.2em] uppercase text-blood flex items-center gap-1.5">
+                      <BarChart2 size={13} />
+                      Scholar Research Statistics
+                    </h3>
+
+                    {onOpenContributorDashboard && (
+                      <button
+                        onClick={() => {
+                          const cId = activeContributor.id;
+                          handleCloseModal();
+                          onOpenContributorDashboard(cId);
+                        }}
+                        className="font-sans text-[9px] font-bold uppercase tracking-wider bg-blood/10 hover:bg-blood border border-blood/30 hover:border-blood text-paper py-1.5 px-3 rounded-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                      >
+                        <BarChart2 size={11} /> Open Contributor Dashboard →
+                      </button>
+                    )}
+                  </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
                     <div className="bg-[#050505] border border-paper/10 p-3.5 rounded-sm flex flex-col justify-between">
@@ -728,7 +1224,7 @@ export default function ContributorsSection({
                   <AuthorAcademicRadar data={stats.radarData} authorName={activeContributor.name} />
                 </div>
 
-                {/* Biography Body */}
+                {/* Biography Body & Research Areas */}
                 <div className="py-6 border-b border-paper/10">
                   <h3 className="font-sans text-[10px] font-bold tracking-[0.2em] uppercase text-blood mb-2">
                     Biography &amp; Academic Focus
@@ -736,6 +1232,25 @@ export default function ContributorsSection({
                   <p className="font-serif text-sm sm:text-base text-paper/80 leading-relaxed whitespace-pre-line">
                     {activeContributor.bio}
                   </p>
+
+                  {/* Research Areas */}
+                  {activeContributor.researchAreas && activeContributor.researchAreas.length > 0 && (
+                    <div className="mt-4">
+                      <span className="font-sans text-[9px] font-bold tracking-widest uppercase text-blood-light block mb-1.5">
+                        Specialized Research Areas
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {activeContributor.researchAreas.map(area => (
+                          <span 
+                            key={area}
+                            className="font-sans text-[9px] font-semibold bg-blood/10 border border-blood/30 text-paper/90 px-3 py-1 rounded-xs"
+                          >
+                            {area}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Specialty Tags */}
                   {activeContributor.tags && activeContributor.tags.length > 0 && (

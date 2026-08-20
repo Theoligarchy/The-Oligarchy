@@ -1,19 +1,28 @@
 import React from 'react';
-import { Instagram, Twitter, Linkedin, BookOpen } from 'lucide-react';
+import { Instagram, Twitter, Linkedin, Mail } from 'lucide-react';
+import { SiteSettings } from '../types';
 
 interface FooterProps {
   setActiveTab: (tab: string) => void;
   setCategoryFilter: (filter: string) => void;
+  siteSettings?: SiteSettings;
 }
 
-export const SOCIAL_LINKS = {
+export const DEFAULT_SOCIAL_LINKS = {
   instagram: 'https://www.instagram.com/theoligarchy.in?igsh=bjV4ZGhpdnJxbjV4',
   twitter: 'https://x.com/TheOligarchy_',
   linkedinCompany: 'https://www.linkedin.com/company/the-oligarchy',
-  linkedinPersonal: 'https://www.linkedin.com/in/priyashapriyaljena'
+  linkedinPersonal: 'https://www.linkedin.com/in/priyashapriyaljena',
+  email: 'theoligarchy.ppj@gmail.com'
 };
 
-export default function Footer({ setActiveTab, setCategoryFilter }: FooterProps) {
+export const SOCIAL_LINKS = DEFAULT_SOCIAL_LINKS;
+
+export default function Footer({ setActiveTab, setCategoryFilter, siteSettings }: FooterProps) {
+  const socials = siteSettings?.socials || DEFAULT_SOCIAL_LINKS;
+  const footerDesc = siteSettings?.footerDescription || 'Independent research platform. Free of corporate sponsorship, commercial agendas, and attention-seeking headlines. Powered strictly by empirical research and critical inquiry.';
+  const copyright = siteSettings?.copyrightText || 'THE OLIGARCHY. ALL RIGHTS RESERVED.';
+  const disclaimer = siteSettings?.disclaimerText || 'Educational resource only under critical inquiry.';
   
   const handleFocusAreaClick = (area: string) => {
     setCategoryFilter(area);
@@ -35,40 +44,55 @@ export default function Footer({ setActiveTab, setCategoryFilter }: FooterProps)
         
         {/* Brand & Social Column */}
         <div className="flex flex-col gap-4">
-          <span className="font-gothic text-3xl text-paper/90">The Oligarchy</span>
+          <span className="font-gothic text-3xl text-paper/90">{siteSettings?.siteName || 'The Oligarchy'}</span>
           <p className="font-serif text-sm text-paper/35 leading-relaxed">
-            Independent research platform. Free of corporate sponsorship, commercial agendas, and attention-seeking headlines. Powered strictly by empirical research and critical inquiry.
+            {footerDesc}
           </p>
           
           {/* Side-by-side Social Links */}
           <div className="flex gap-2.5 mt-2">
-            <a 
-              href={SOCIAL_LINKS.instagram} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="w-9 h-9 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood flex items-center justify-center transition-all duration-200"
-              title="Follow us on Instagram"
-            >
-              <Instagram size={15} />
-            </a>
-            <a 
-              href={SOCIAL_LINKS.twitter} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="w-9 h-9 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood flex items-center justify-center transition-all duration-200"
-              title="Follow us on X / Twitter"
-            >
-              <Twitter size={15} />
-            </a>
-            <a 
-              href={SOCIAL_LINKS.linkedinCompany} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="w-9 h-9 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood flex items-center justify-center transition-all duration-200"
-              title="Follow our LinkedIn Company Page"
-            >
-              <Linkedin size={15} />
-            </a>
+            {socials.instagram && (
+              <a 
+                href={socials.instagram} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="w-9 h-9 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood flex items-center justify-center transition-all duration-200"
+                title="Follow us on Instagram"
+              >
+                <Instagram size={15} />
+              </a>
+            )}
+            {socials.twitter && (
+              <a 
+                href={socials.twitter} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="w-9 h-9 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood flex items-center justify-center transition-all duration-200"
+                title="Follow us on X / Twitter"
+              >
+                <Twitter size={15} />
+              </a>
+            )}
+            {(socials.linkedinCompany || socials.linkedinPersonal) && (
+              <a 
+                href={socials.linkedinCompany || socials.linkedinPersonal} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="w-9 h-9 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood flex items-center justify-center transition-all duration-200"
+                title="Follow our LinkedIn Page"
+              >
+                <Linkedin size={15} />
+              </a>
+            )}
+            {socials.email && (
+              <a 
+                href={`mailto:${socials.email}`} 
+                className="w-9 h-9 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood flex items-center justify-center transition-all duration-200"
+                title="Email Editorial Office"
+              >
+                <Mail size={15} />
+              </a>
+            )}
           </div>
         </div>
 
@@ -118,6 +142,21 @@ export default function Footer({ setActiveTab, setCategoryFilter }: FooterProps)
               </button>
             </li>
             <li>
+              <button onClick={() => handlePageNavigate('contributors')} className="hover:text-paper hover:underline transition-colors text-left cursor-pointer">
+                Contributors Registry
+              </button>
+            </li>
+            <li>
+              <button onClick={() => handlePageNavigate('contributor-dashboard')} className="hover:text-paper hover:underline transition-colors text-left cursor-pointer">
+                Contributor Dashboard &amp; Analytics
+              </button>
+            </li>
+            <li>
+              <button onClick={() => handlePageNavigate('submit-investigation')} className="hover:text-paper hover:underline transition-colors text-left cursor-pointer text-blood-light font-semibold">
+                Submit an Investigation
+              </button>
+            </li>
+            <li>
               <button onClick={() => handlePageNavigate('principles')} className="hover:text-paper hover:underline transition-colors text-left cursor-pointer">
                 Editorial Principles
               </button>
@@ -143,17 +182,17 @@ export default function Footer({ setActiveTab, setCategoryFilter }: FooterProps)
           <ul className="font-serif text-sm flex flex-col gap-2.5 text-paper/35">
             <li>
               <span className="hover:text-paper transition-colors select-text">
-                Disclaimer: Educational resource only.
+                Disclaimer: {disclaimer}
               </span>
             </li>
             <li>
               <span className="hover:text-paper transition-colors select-text">
-                Privacy Policy: Local cookies only.
+                Privacy: Minimal local cookies only.
               </span>
             </li>
             <li>
               <span className="hover:text-paper transition-colors select-text">
-                Terms: Non-commercial license.
+                Terms: Non-commercial fair research inquiry.
               </span>
             </li>
           </ul>
@@ -162,8 +201,8 @@ export default function Footer({ setActiveTab, setCategoryFilter }: FooterProps)
 
       {/* Footer Bottom Credentials Bar */}
       <div className="max-w-7xl mx-auto border-t border-paper/10 pt-6 flex flex-col md:flex-row justify-between items-center gap-4 text-center">
-        <span className="font-sans text-[10px] tracking-widest text-paper/20">
-          &copy; {new Date().getFullYear()} THE OLIGARCHY. ALL RIGHTS RESERVED.
+        <span className="font-sans text-[10px] tracking-widest text-paper/20 uppercase">
+          &copy; {new Date().getFullYear()} {copyright}
         </span>
         <span className="font-sans text-[10px] tracking-widest text-paper/20 uppercase">
           theoligarchy.in

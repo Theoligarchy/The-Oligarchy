@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Menu, X, Settings, Share2, Check } from 'lucide-react';
+import { Search, Menu, X, Settings, Share2, Check, Megaphone, ArrowRight } from 'lucide-react';
+import { SiteSettings } from '../types';
 
 interface HeaderProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   onSearch: (query: string) => void;
   savedCount?: number;
+  siteSettings?: SiteSettings;
 }
 
-export default function Header({ activeTab, setActiveTab, onSearch, savedCount = 0 }: HeaderProps) {
+export default function Header({ activeTab, setActiveTab, onSearch, savedCount = 0, siteSettings }: HeaderProps) {
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -32,12 +34,34 @@ export default function Header({ activeTab, setActiveTab, onSearch, savedCount =
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const siteTitle = siteSettings?.siteName || 'The Oligarchy';
+  const siteTagline = siteSettings?.tagline || 'Research · Analysis · Critical Thinking';
+  const isAnnouncementActive = siteSettings?.announcementActive && siteSettings?.announcementText;
+
   return (
     <header className="bg-ink border-b-3 border-double border-paper/20 select-none">
+      {/* Dynamic Announcement Banner Marquee if enabled */}
+      {isAnnouncementActive && (
+        <div className="bg-blood/95 border-b border-blood text-paper py-2 px-4 text-center font-serif text-xs flex items-center justify-center gap-2 shadow-inner">
+          <Megaphone size={13} className="text-amber-300 shrink-0 animate-bounce" />
+          <span className="font-semibold">{siteSettings.announcementText}</span>
+          {siteSettings.announcementLink && (
+            <a
+              href={siteSettings.announcementLink}
+              target={siteSettings.announcementLink.startsWith('http') ? '_blank' : '_self'}
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-sans text-[9px] uppercase tracking-wider font-bold bg-midnight/80 hover:bg-midnight px-2 py-0.5 rounded-xs border border-paper/20 ml-2 transition-colors"
+            >
+              Access Dossier <ArrowRight size={10} />
+            </a>
+          )}
+        </div>
+      )}
+
       {/* Upper Masthead Info Bar */}
       <div className="font-sans text-[10px] md:text-xs text-paper/40 tracking-[0.18em] uppercase py-2.5 px-6 border-b border-paper/10 flex flex-wrap justify-between gap-2">
         <span>theoligarchy.in</span>
-        <span className="hidden md:inline">Independent Research Platform</span>
+        <span className="hidden md:inline">{siteSettings?.issnNumber ? `${siteSettings.issnNumber} · ` : ''}Independent Research Platform</span>
         <span>{todayDate}</span>
       </div>
 
@@ -47,10 +71,10 @@ export default function Header({ activeTab, setActiveTab, onSearch, savedCount =
           onClick={() => navigateTo('home')} 
           className="font-gothic text-5xl md:text-8xl text-paper hover:text-blood transition-colors duration-300 cursor-pointer selection:bg-blood selection:text-paper leading-none"
         >
-          The Oligarchy
+          {siteTitle}
         </h1>
         <p className="font-serif text-xs md:text-sm italic text-paper/40 tracking-[0.05em] mt-1 selection:bg-blood selection:text-paper">
-          Research · Analysis · Critical Thinking
+          {siteTagline}
         </p>
       </div>
 
@@ -70,6 +94,8 @@ export default function Header({ activeTab, setActiveTab, onSearch, savedCount =
             { id: 'research', label: 'Research Areas' },
             { id: 'reading-list', label: `Reading List${savedCount > 0 ? ` (${savedCount})` : ''}` },
             { id: 'contributors', label: 'Contributors' },
+            { id: 'contributor-dashboard', label: '📊 Contributor Dashboard' },
+            { id: 'submit-investigation', label: 'Submit Investigation' },
             { id: 'principles', label: 'Editorial Principles' },
             { id: 'about', label: 'About' },
             { id: 'contact', label: 'Contact' },
@@ -78,7 +104,7 @@ export default function Header({ activeTab, setActiveTab, onSearch, savedCount =
             <button
               key={item.id}
               onClick={() => navigateTo(item.id)}
-              className={`font-sans text-[11px] font-semibold tracking-widest uppercase py-4 px-4 lg:px-5 border-r border-paper/10 transition-all duration-200 cursor-pointer flex items-center gap-1.5 ${
+              className={`font-sans text-[11px] font-semibold tracking-widest uppercase py-4 px-3.5 lg:px-4 border-r border-paper/10 transition-all duration-200 cursor-pointer flex items-center gap-1.5 ${
                 activeTab === item.id 
                   ? 'bg-blood text-paper' 
                   : 'text-paper/60 hover:bg-blood hover:text-paper'
@@ -177,6 +203,8 @@ export default function Header({ activeTab, setActiveTab, onSearch, savedCount =
             { id: 'research', label: 'Research Areas' },
             { id: 'reading-list', label: `Reading List${savedCount > 0 ? ` (${savedCount})` : ''}` },
             { id: 'contributors', label: 'Contributors' },
+            { id: 'contributor-dashboard', label: '📊 Contributor Dashboard' },
+            { id: 'submit-investigation', label: '✍️ Submit an Investigation' },
             { id: 'principles', label: 'Editorial Principles' },
             { id: 'about', label: 'About' },
             { id: 'contact', label: 'Contact' },

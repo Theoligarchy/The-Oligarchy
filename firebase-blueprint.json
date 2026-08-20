@@ -53,8 +53,26 @@
       "properties": {
         "id": { "type": "string", "description": "Author ID" },
         "name": { "type": "string", "description": "Full author name" },
+        "slug": { "type": "string", "description": "URL-safe author slug identifier" },
         "role": { "type": "string", "description": "Editorial or academic title" },
-        "bio": { "type": "string", "description": "Biographical summary" }
+        "bio": { "type": "string", "description": "Biographical summary" },
+        "avatarUrl": { "type": "string", "description": "Profile avatar image URL" },
+        "profileImage": { "type": "string", "description": "Profile picture image URL" },
+        "institution": { "type": "string", "description": "Academic or research institution affiliation" },
+        "credentials": { "type": "string", "description": "Degrees and professional credentials" },
+        "orcid": { "type": "string", "description": "ORCID identifier" },
+        "researchAreas": { "type": "array", "description": "Academic research disciplines" },
+        "specializations": { "type": "array", "description": "Research specializations" },
+        "affiliations": { "type": "array", "description": "Organizational affiliations" },
+        "email": { "type": "string", "description": "Contact email" },
+        "tags": { "type": "array", "description": "Taxonomy tags" },
+        "socials": { "type": "object", "description": "Social and scholarly links" },
+        "isVisible": { "type": "boolean", "description": "Flag for public display visibility" },
+        "displayOrder": { "type": "number", "description": "Sorting priority in contributors list" },
+        "isFounder": { "type": "boolean", "description": "Flag indicating founding editor" },
+        "joinedDate": { "type": "string", "description": "Year or date joined" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in epoch ms" },
+        "updatedAt": { "type": "number", "description": "Last updated timestamp in epoch ms" }
       },
       "required": ["id", "name", "role", "bio"]
     },
@@ -91,9 +109,59 @@
         "articleId": { "type": "string", "description": "Article ID" },
         "articleTitle": { "type": "string", "description": "Article title" },
         "category": { "type": "string", "description": "Article category" },
-        "timestamp": { "type": "number", "description": "View timestamp" }
+        "timestamp": { "type": "number", "description": "View timestamp" },
+        "readDurationSeconds": { "type": "number", "description": "Estimated or tracked read duration in seconds" },
+        "authorId": { "type": "string", "description": "Author identifier" },
+        "referrer": { "type": "string", "description": "Traffic source referrer" }
       },
       "required": ["articleId", "articleTitle", "timestamp"]
+    },
+    "ManuscriptSubmission": {
+      "title": "ManuscriptSubmission",
+      "description": "Scholarly investigation pitch or complete research manuscript submitted for editorial peer triage.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique pitch document ID" },
+        "referenceId": { "type": "string", "description": "Scholarly tracking reference ID" },
+        "authorName": { "type": "string", "description": "Lead author or researcher name" },
+        "authorEmail": { "type": "string", "description": "Author contact email address" },
+        "authorTitle": { "type": "string", "description": "Academic title or professional credentials" },
+        "authorInstitution": { "type": "string", "description": "University, laboratory, or institutional affiliation" },
+        "category": { "type": "string", "enum": ["criminology", "psyche", "politics"], "description": "Target investigation academic discipline" },
+        "submissionType": { "type": "string", "enum": ["full_manuscript", "investigative_pitch", "case_study", "methodological_critique"], "description": "Submission taxonomy" },
+        "title": { "type": "string", "description": "Investigation or manuscript title" },
+        "abstract": { "type": "string", "description": "Executive abstract and analytical summary" },
+        "content": { "type": "string", "description": "Full manuscript text or detailed investigation methodology" },
+        "status": { "type": "string", "enum": ["received", "in_peer_review", "revisions_needed", "accepted", "declined"], "description": "Editorial triage status" },
+        "submittedAt": { "type": "number", "description": "Submission epoch timestamp" },
+        "updatedAt": { "type": "number", "description": "Last triage update timestamp" }
+      },
+      "required": ["id", "referenceId", "authorName", "authorEmail", "category", "title", "abstract", "content", "status", "submittedAt"]
+    },
+    "EditorialUser": {
+      "title": "EditorialUser",
+      "description": "Editorial board member and peer reviewer RBAC registry record.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase auth UID or unique member ID" },
+        "email": { "type": "string", "description": "Verified institutional email" },
+        "displayName": { "type": "string", "description": "Display name and credentials" },
+        "role": { "type": "string", "enum": ["admin", "reviewer", "author"], "description": "Editorial access tier" },
+        "status": { "type": "string", "enum": ["active", "suspended", "invited"], "description": "Account activity status" }
+      },
+      "required": ["uid", "email", "displayName", "role"]
+    },
+    "SavedArticle": {
+      "title": "SavedArticle",
+      "description": "Reader bookmarked article with personal notes.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique saved record ID" },
+        "readerId": { "type": "string", "description": "Persistent reader session ID" },
+        "articleId": { "type": "string", "description": "Referenced article ID" },
+        "savedAt": { "type": "number", "description": "Bookmark timestamp" }
+      },
+      "required": ["id", "readerId", "articleId", "savedAt"]
     }
   },
   "firestore": {
@@ -109,6 +177,14 @@
       "schema": "AuthorProfile",
       "description": "Journal authors and editorial contributors."
     },
+    "/editorial_team/{memberId}": {
+      "schema": "EditorialUser",
+      "description": "Editorial board member profiles and RBAC credentials."
+    },
+    "/user_saved_articles/{savedId}": {
+      "schema": "SavedArticle",
+      "description": "Reader saved article bookmarks."
+    },
     "/subscribers/{subscriberId}": {
       "schema": "NewsletterSubscriber",
       "description": "Email dispatch subscribers list."
@@ -117,9 +193,17 @@
       "schema": "PeerAnnotation",
       "description": "Marginalia annotations and scholarly discourse comments."
     },
+    "/peer_annotations/{annotationId}": {
+      "schema": "PeerAnnotation",
+      "description": "Article line-level marginalia commentary."
+    },
     "/views_log/{viewId}": {
       "schema": "ViewLog",
       "description": "Readership view telemetry events."
+    },
+    "/submissions/{submissionId}": {
+      "schema": "ManuscriptSubmission",
+      "description": "Public research manuscript submissions and investigation pitches triage pipeline."
     }
   }
 }

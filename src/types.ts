@@ -5,6 +5,17 @@ export interface Source {
   citation?: string;
 }
 
+export interface CoAuthor {
+  name: string;
+  role?: string; // e.g. "Co-Author", "Lead Data Analyst", "Methodology Reviewer", "Field Researcher", "Forensic Consultant"
+  institution?: string; // e.g. "Tata Institute of Social Sciences"
+  orcid?: string; // e.g. "0000-0002-1825-0097"
+  email?: string;
+  bio?: string;
+  avatarUrl?: string;
+  profileUrl?: string;
+}
+
 export interface ArticleVersion {
   id: string;
   timestamp: number;
@@ -26,6 +37,12 @@ export interface Article {
   pdfLink?: string; // Research report PDF download link
   authorId: string;
   authorName: string;
+  authorTitle?: string; // e.g. "Senior Fellow in Criminological Sciences"
+  authorInstitution?: string; // e.g. "The Oligarchy Research Group"
+  authorOrcid?: string; // e.g. "0000-0002-1825-0097"
+  coAuthors?: CoAuthor[]; // Multi-author attribution for investigative series
+  doi?: string; // e.g. "10.5281/zenodo.10892341"
+  archivalRefId?: string; // e.g. "TOL-2026-PSY-001"
   readTime: string; // Calculated read time e.g. "12 min read"
   excerpt: string;
   content: string; // HTML content from Quill
@@ -42,9 +59,31 @@ export interface Article {
   seriesName?: string; // Series grouping name
   seriesPart?: number; // Part index
   versions?: ArticleVersion[]; // History of edits
+  createdByUid?: string; // UID of the author/editor who created this manuscript
+  createdByEmail?: string; // Email of the creator for ownership checks
   seoTitle?: string;
   seoDescription?: string;
+  metaTitle?: string;
+  metaDescription?: string;
   canonicalUrl?: string;
+}
+
+export type EditorialRole = 'author' | 'reviewer' | 'admin';
+
+export interface EditorialUser {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: EditorialRole;
+  authorId?: string; // Links to AuthorProfile (e.g. 'priyasha-priyal-jena')
+  institution?: string; // e.g. "Oxford Criminology Dept"
+  orcid?: string; // e.g. "0000-0002-1825-0097"
+  credentials?: string; // e.g. "PhD Candidate, Forensic Psychology"
+  bio?: string;
+  assignedCategories?: ('criminology' | 'psyche' | 'politics')[];
+  createdAt?: number;
+  lastLoginAt?: number;
+  status?: 'active' | 'pending' | 'suspended';
 }
 
 export interface MediaFile {
@@ -83,20 +122,35 @@ export interface ResearchTip {
 export interface AuthorProfile {
   id: string;
   name: string;
+  slug?: string;
   role: string;
   bio: string;
   avatarUrl?: string;
+  profileImage?: string; // interchangeable with avatarUrl
   institution?: string;
+  credentials?: string; // e.g. "B.A. LL.B (Hons), Forensic Fellow"
+  orcid?: string; // e.g. "0000-0002-1825-0097"
+  researchAreas?: string[]; // e.g. ["Pathological Fantasy", "State Bureaucracy", "Forensic Profiling"]
+  specializations?: string[]; // alias / compatibility with researchAreas
+  affiliations?: string[]; // e.g. ["The Oligarchy Research Group", "Centre for Constitutional Studies"]
   email?: string;
-  tags: string[];
+  tags?: string[];
   socials: {
     instagram?: string;
     twitter?: string;
     linkedin?: string;
     website?: string;
+    googleScholar?: string;
+    researchGate?: string;
+    ssrn?: string;
+    email?: string;
   };
+  isVisible?: boolean; // Controls public visibility (default true)
+  displayOrder?: number; // Sorting index in public registry
   isFounder?: boolean;
   joinedDate?: string;
+  createdAt?: number;
+  updatedAt?: number;
   featuredArticleIds?: string[];
 }
 
@@ -105,6 +159,61 @@ export interface SystemSettings {
   siteTitle: string;
   siteHeadline: string;
   siteSubheading: string;
+}
+
+export interface SiteSettings {
+  siteName: string;
+  tagline: string;
+  subheading: string;
+  missionStatement: string;
+  foundingYear: string;
+  issnNumber?: string;
+  
+  // Announcement banner
+  announcementActive: boolean;
+  announcementText: string;
+  announcementLink?: string;
+  
+  // Hero section
+  heroFeaturedArticleId?: string; // If set, manually forces this article as hero
+  heroSubtitleOverride?: string;
+  heroExcerptOverride?: string;
+  
+  // Category configuration
+  criminologyHeading: string;
+  criminologyDescription: string;
+  psycheHeading: string;
+  psycheDescription: string;
+  politicsHeading: string;
+  politicsDescription: string;
+  
+  // About / Philosophy / Manifesto
+  aboutTitle: string;
+  aboutContent: string;
+  editorialPrinciples: string;
+  peerReviewPolicy: string;
+  
+  // Social links & Contact
+  socials: {
+    instagram: string;
+    twitter: string;
+    linkedinPersonal: string;
+    linkedinCompany: string;
+    substack?: string;
+    email: string;
+  };
+  
+  // Footer & Legal
+  footerDescription: string;
+  copyrightText: string;
+  disclaimerText: string;
+  
+  // SEO defaults
+  defaultSeoTitle: string;
+  defaultSeoDescription: string;
+  defaultOgImage?: string;
+  
+  updatedAt?: number;
 }
 
 export interface ViewLog {
@@ -139,6 +248,82 @@ export interface PeerAnnotation {
   timestamp: number;
   likes: number;          // Scholarly upvotes/endorsements
   replies: PeerReply[];   // Nested replies
+}
+
+export interface ManuscriptSubmission {
+  id: string;
+  referenceId: string; // e.g. "TOL-2026-X84K"
+  authorName: string;
+  authorEmail: string;
+  authorTitle: string; // e.g. "Fellow in Criminological Sciences"
+  authorInstitution?: string; // e.g. "Cambridge Institute of Criminology"
+  authorBio?: string;
+  authorSocialUrl?: string; // LinkedIn, Twitter, or Academic Portfolio
+  category: 'criminology' | 'psyche' | 'politics';
+  submissionType: 'full_manuscript' | 'investigative_pitch' | 'case_study' | 'methodological_critique';
+  title: string;
+  subtitle?: string;
+  abstract: string;
+  content: string; // HTML or Markdown formatted manuscript body
+  sourcesText?: string;
+  datasetUrl?: string;
+  coAuthors?: string;
+  status: 'received' | 'in_peer_review' | 'revisions_needed' | 'accepted' | 'declined';
+  submittedAt: number;
+  updatedAt: number;
+  editorialNotes?: string;
+  peerReviewerFeedback?: string;
+  notificationHistory?: Array<{
+    status: string;
+    timestamp: number;
+    recipient: string;
+    subject: string;
+  }>;
+}
+
+export interface DraftNoteReply {
+  id: string;
+  authorName: string;
+  authorEmail: string;
+  authorRole: EditorialRole;
+  content: string;
+  timestamp: number;
+}
+
+export type DraftNoteCategory = 'fact_checking' | 'legal_review' | 'citation_validation' | 'methodology' | 'general';
+export type DraftNoteUrgency = 'critical' | 'moderate' | 'minor';
+export type DraftNoteStatus = 'open' | 'in_progress' | 'resolved';
+
+export interface DraftInternalNote {
+  id: string;
+  articleId: string;
+  articleTitle?: string;
+  category: DraftNoteCategory;
+  urgency: DraftNoteUrgency;
+  status: DraftNoteStatus;
+  authorName: string;
+  authorEmail: string;
+  authorRole: EditorialRole;
+  content: string;
+  referencedSnippet?: string; // Optional excerpt or quote from the draft being flagged
+  sectionName?: string; // Section or paragraph reference
+  timestamp: number;
+  resolvedAt?: number;
+  resolvedBy?: string;
+  resolutionNote?: string;
+  replies: DraftNoteReply[];
+}
+
+export interface ContributorStats {
+  totalArticles: number;
+  publishedCount: number;
+  draftsCount: number;
+  totalViews: number;
+  totalBookmarks: number;
+  totalPeerAnnotations: number;
+  totalCitationsGenerated: number;
+  openRevisionNotesCount: number;
+  resolvedRevisionNotesCount: number;
 }
 
 export interface SavedArticle {
