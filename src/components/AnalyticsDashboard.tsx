@@ -274,83 +274,6 @@ export default function AnalyticsDashboard({ allArticles, subscribersCount }: An
 
   const referrerDistribution = getReferrerDistribution();
 
-  // Simulation generator: seeds past 30 days with structured view log events
-  const handleSimulateTraffic = async () => {
-    const publishedArticles = allArticles.filter(a => a.status === 'published');
-    if (publishedArticles.length === 0) {
-      alert("You need to publish at least one article to simulate reader traffic!");
-      return;
-    }
-
-    setSimulationStatus('simulating');
-    setSimCount(0);
-
-    try {
-      const userAgents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', // Desktop Chrome
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15', // Mac Safari
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1', // iPhone Safari
-        'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36', // Android Chrome
-        'Mozilla/5.0 (iPad; CPU OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1' // iPad Tablet
-      ];
-
-      const referrers = [
-        'direct',
-        'direct',
-        'direct',
-        'https://www.google.com/',
-        'https://www.google.com/',
-        'https://t.co/', // Twitter short URL
-        'https://x.com/theoligarchy/status/124982',
-        'https://www.reddit.com/r/criminology/',
-        'https://www.linkedin.com/',
-        'https://news.ycombinator.com/'
-      ];
-
-      const colRef = collection(db, 'views_log');
-      
-      // Let's create about 180 realistic logs distributed over the past 30 days
-      const totalEvents = 150;
-      let added = 0;
-      
-      // Write in smaller chunks of 25 using writeBatch or sequential writes to avoid Firebase rate limit errors
-      for (let i = 0; i < totalEvents; i++) {
-        // Random article from published ones
-        const randomArt = publishedArticles[Math.floor(Math.random() * publishedArticles.length)];
-        
-        // Random days ago (0 to 30)
-        const daysAgo = Math.floor(Math.random() * 30);
-        const hoursAgo = Math.floor(Math.random() * 24);
-        const minsAgo = Math.floor(Math.random() * 60);
-        const logTimestamp = Date.now() - (daysAgo * 24 * 60 * 60 * 1000) - (hoursAgo * 60 * 60 * 1000) - (minsAgo * 60 * 1000);
-
-        const ua = userAgents[Math.floor(Math.random() * userAgents.length)];
-        const ref = referrers[Math.floor(Math.random() * referrers.length)];
-
-        const payload: ViewLog = {
-          articleId: randomArt.id,
-          articleTitle: randomArt.title,
-          category: randomArt.category || 'politics',
-          timestamp: logTimestamp,
-          userAgent: ua,
-          referrer: ref
-        };
-
-        await addDoc(colRef, payload);
-        added++;
-        if (added % 10 === 0) {
-          setSimCount(added);
-        }
-      }
-
-      setSimulationStatus('success');
-      loadLogs(); // Reload logs from db
-    } catch (e) {
-      console.error("Traffic simulation failed:", e);
-      setSimulationStatus('error');
-    }
-  };
-
   // Clear views log entries
   const handleClearAllLogs = async () => {
     if (!window.confirm("Are you sure you want to delete all historical analytics logs? This will reset view tracking charts (Lifetime hits counter on individual articles remains untouched).")) {
@@ -751,51 +674,32 @@ export default function AnalyticsDashboard({ allArticles, subscribersCount }: An
 
       </div>
 
-      {/* 4. DEV TRAFFIC UTILITY BANNER */}
-      <div className="bg-[#8b1a1a]/5 border border-[#8b1a1a]/20 p-5 rounded-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      {/* 4. VERIFIED TELEMETRY AUDIT */}
+      <div className="bg-navy/40 border border-paper/10 p-5 rounded-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="flex gap-3 items-start">
-          <div className="bg-[#8b1a1a]/10 p-2 border border-[#8b1a1a]/30 rounded-sm text-blood shrink-0">
+          <div className="bg-blood/10 p-2 border border-blood/20 rounded-sm text-blood shrink-0">
             <Database size={16} />
           </div>
           <div>
             <h4 className="font-display text-sm font-bold text-paper">
-              Research Analytics Simulator (Dev Mode)
+              Verified Real-Time Readership Logs
             </h4>
             <p className="font-serif text-xs text-paper/50 leading-relaxed mt-1 max-w-xl">
-              Since the visitor database tracks authentic direct loads, your analytics chart might initially look thin or show only 1 (you!). Click the generator to automatically populate **150 structured, historical view logs** distributed across the past 30 days based on your published articles.
+              All views, timestamps, and referrers reflect authentic reader interactions recorded in the database. No simulated or artificial telemetry is generated.
             </p>
           </div>
         </div>
 
-        <div className="flex gap-2 self-stretch md:self-auto shrink-0">
-          <button
-            onClick={handleSimulateTraffic}
-            disabled={simulationStatus === 'simulating' || allArticles.filter(a => a.status === 'published').length === 0}
-            className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-blood hover:bg-blood-light disabled:bg-[#8b1a1a]/20 disabled:text-paper/30 text-paper font-sans text-[9px] font-bold tracking-widest uppercase px-4 py-2.5 rounded-sm cursor-pointer transition-all shadow-md"
-          >
-            {simulationStatus === 'simulating' ? (
-              <>
-                <RefreshCw size={11} className="animate-spin" /> Seeding ({simCount}/150)...
-              </>
-            ) : simulationStatus === 'success' ? (
-              <>
-                <CheckCircle2 size={11} /> Seeding Success!
-              </>
-            ) : (
-              <>
-                <Sparkles size={11} /> Seed Test Traffic
-              </>
-            )}
-          </button>
-          
+        <div className="flex gap-2 self-stretch md:self-auto shrink-0 items-center">
           {logs.length > 0 && (
             <button
               onClick={handleClearAllLogs}
               disabled={cleaningStatus === 'cleaning'}
-              className="border border-paper/10 hover:border-red-900 hover:bg-red-950/10 text-paper/60 hover:text-red-400 p-2.5 rounded-sm cursor-pointer transition-all"
+              className="border border-paper/10 hover:border-red-900 hover:bg-red-950/20 text-paper/60 hover:text-red-400 px-3 py-2 text-xs font-sans rounded-sm cursor-pointer transition-all flex items-center gap-1.5"
               title="Clear all view logs"
             >
               <Trash2 size={13} />
+              <span>Reset Logs ({logs.length})</span>
             </button>
           )}
         </div>

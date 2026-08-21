@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { EditorialUser, EditorialRole } from '../types';
+import { EmptyState } from './EmptyState';
 import { 
   fetchEditorialTeam, 
   saveEditorialMember, 
   deleteEditorialMember, 
   ROLE_LABELS 
 } from '../lib/rbac';
+import { validateEditorialMemberForm } from '../utils/formValidation';
 import { 
   Users, 
   ShieldCheck, 
@@ -42,6 +44,16 @@ export default function EditorialTeamManager({
   const [team, setTeam] = useState<EditorialUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [memberErrors, setMemberErrors] = useState<Record<string, string>>({});
+
+  const clearMemberError = (field: string) => {
+    setMemberErrors(prev => {
+      if (!prev[field]) return prev;
+      const copy = { ...prev };
+      delete copy[field];
+      return copy;
+    });
+  };
 
   // Modal / Form state for Adding or Editing member
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -80,6 +92,7 @@ export default function EditorialTeamManager({
 
   const openAddModal = () => {
     setEditingUid(null);
+    setMemberErrors({});
     setFormName('');
     setFormEmail('');
     setFormRole('author');
@@ -93,6 +106,7 @@ export default function EditorialTeamManager({
 
   const openEditModal = (member: EditorialUser) => {
     setEditingUid(member.uid);
+    setMemberErrors({});
     setFormName(member.displayName || '');
     setFormEmail(member.email || '');
     setFormRole(member.role);
@@ -106,27 +120,42 @@ export default function EditorialTeamManager({
 
   const handleSaveMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName.trim() || !formEmail.trim()) {
-      setAlert({ text: 'Name and Email are required fields.', type: 'error' });
+
+    const validation = validateEditorialMemberForm({
+      displayName: formName,
+      email: formEmail,
+      role: formRole,
+      institution: formInstitution,
+      credentials: formCredentials,
+      orcid: formOrcid,
+      bio: formBio,
+      assignedCategories: formCategories
+    });
+
+    if (!validation.isValid) {
+      setMemberErrors(validation.errors);
+      const firstError = Object.values(validation.errors)[0];
+      setAlert({ text: `Validation Error: ${firstError}`, type: 'error' });
       return;
     }
 
+    setMemberErrors({});
     setIsSaving(true);
     try {
       const uid = editingUid || `member-${Date.now().toString(36)}`;
-      const authorId = formName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const authorId = validation.sanitized.displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       
       const memberData: EditorialUser = {
         uid,
-        email: formEmail.trim().toLowerCase(),
-        displayName: formName.trim(),
-        role: formRole,
+        email: validation.sanitized.email,
+        displayName: validation.sanitized.displayName,
+        role: validation.sanitized.role,
         authorId,
-        institution: formInstitution.trim() || undefined,
-        credentials: formCredentials.trim() || undefined,
-        orcid: formOrcid.trim() || undefined,
-        bio: formBio.trim() || undefined,
-        assignedCategories: formCategories,
+        institution: validation.sanitized.institution || undefined,
+        credentials: validation.sanitized.credentials || undefined,
+        orcid: validation.sanitized.orcid || undefined,
+        bio: validation.sanitized.bio || undefined,
+        assignedCategories: validation.sanitized.assignedCategories,
         status: 'active',
         createdAt: editingUid ? (team.find(m => m.uid === editingUid)?.createdAt || Date.now()) : Date.now(),
         lastLoginAt: Date.now()
@@ -290,7 +319,22 @@ export default function EditorialTeamManager({
               </tr>
             </thead>
             <tbody className="divide-y divide-paper/5 font-serif text-xs text-paper/70">
-              {team.map((member) => {
+              {team.length === 0 ? (
+                <EmptyState
+                  variant="table-cell"
+                  colSpan={5}
+                  icon={Users}
+                  badge="EMPTY EDITORIAL ROSTER"
+                  title="No Editorial Members Registered"
+                  description="The masthead and staff directory contains no registered staff members. Commission an editor, peer reviewer, or scholar to expand the team."
+                  action={{
+                    label: 'Add Editorial Member',
+                    onClick: openAddModal,
+                    icon: UserPlus
+                  }}
+                />
+              ) : (
+                team.map((member) => {
                 const roleInfo = ROLE_LABELS[member.role] || ROLE_LABELS.author;
                 const isPrimaryFounder = member.email.toLowerCase() === 'theoligarchy.ppj@gmail.com';
 
@@ -406,7 +450,7 @@ export default function EditorialTeamManager({
                     </td>
                   </tr>
                 );
-              })}
+              }))}
             </tbody>
           </table>
         </div>
@@ -440,30 +484,54 @@ export default function EditorialTeamManager({
               <form onSubmit={handleSaveMember} className="flex flex-col gap-4 text-xs font-serif">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1">
-                    <label className="font-sans text-[9px] font-bold uppercase tracking-wider text-paper/40">
-                      Full Name *
-                    </label>
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[9px] font-bold uppercase tracking-wider text-paper/40">
+                        Full Name *
+                      </label>
+                      {memberErrors.displayName && (
+                        <span className="font-sans text-[9px] font-bold text-red-400">
+                          {memberErrors.displayName}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. Dr. Alistair Vance"
+                      placeholder="Scholar Full Name"
                       value={formName}
-                      onChange={(e) => setFormName(e.target.value)}
-                      className="bg-midnight border border-paper/15 text-paper p-2.5 rounded-sm focus:outline-none focus:border-blood font-serif"
+                      onChange={(e) => {
+                        clearMemberError('displayName');
+                        setFormName(e.target.value);
+                      }}
+                      className={`bg-midnight border text-paper p-2.5 rounded-sm focus:outline-none font-serif ${
+                        memberErrors.displayName ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                      }`}
                     />
                   </div>
 
                   <div className="flex flex-col gap-1">
-                    <label className="font-sans text-[9px] font-bold uppercase tracking-wider text-paper/40">
-                      Email Address *
-                    </label>
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[9px] font-bold uppercase tracking-wider text-paper/40">
+                        Email Address *
+                      </label>
+                      {memberErrors.email && (
+                        <span className="font-sans text-[9px] font-bold text-red-400">
+                          {memberErrors.email}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="email"
                       required
-                      placeholder="scholar@university.edu"
+                      placeholder="scholar@organization.org"
                       value={formEmail}
-                      onChange={(e) => setFormEmail(e.target.value)}
-                      className="bg-midnight border border-paper/15 text-paper p-2.5 rounded-sm focus:outline-none focus:border-blood font-mono text-xs"
+                      onChange={(e) => {
+                        clearMemberError('email');
+                        setFormEmail(e.target.value);
+                      }}
+                      className={`bg-midnight border text-paper p-2.5 rounded-sm focus:outline-none font-mono text-xs ${
+                        memberErrors.email ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                      }`}
                     />
                   </div>
                 </div>
@@ -479,7 +547,10 @@ export default function EditorialTeamManager({
                         <button
                           key={r}
                           type="button"
-                          onClick={() => setFormRole(r)}
+                          onClick={() => {
+                            clearMemberError('role');
+                            setFormRole(r);
+                          }}
                           className={`p-2.5 rounded-sm border text-center font-sans text-[9px] font-bold tracking-wider uppercase transition-all cursor-pointer ${
                             selected 
                               ? 'bg-blood/20 border-blood text-paper ring-1 ring-blood' 
@@ -495,42 +566,78 @@ export default function EditorialTeamManager({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1">
-                    <label className="font-sans text-[9px] font-bold uppercase tracking-wider text-paper/40">
-                      Academic Institution / Department
-                    </label>
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[9px] font-bold uppercase tracking-wider text-paper/40">
+                        Academic Institution / Department
+                      </label>
+                      {memberErrors.institution && (
+                        <span className="font-sans text-[9px] font-bold text-red-400">
+                          {memberErrors.institution}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
-                      placeholder="e.g. Oxford Criminology Dept"
+                      placeholder="University, Research Institute, or Think Tank"
                       value={formInstitution}
-                      onChange={(e) => setFormInstitution(e.target.value)}
-                      className="bg-midnight border border-paper/15 text-paper p-2.5 rounded-sm focus:outline-none focus:border-blood font-serif"
+                      onChange={(e) => {
+                        clearMemberError('institution');
+                        setFormInstitution(e.target.value);
+                      }}
+                      className={`bg-midnight border text-paper p-2.5 rounded-sm focus:outline-none font-serif ${
+                        memberErrors.institution ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                      }`}
                     />
                   </div>
 
                   <div className="flex flex-col gap-1">
-                    <label className="font-sans text-[9px] font-bold uppercase tracking-wider text-paper/40">
-                      ORCID iD
-                    </label>
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[9px] font-bold uppercase tracking-wider text-paper/40">
+                        ORCID iD
+                      </label>
+                      {memberErrors.orcid && (
+                        <span className="font-sans text-[9px] font-bold text-red-400">
+                          {memberErrors.orcid}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
-                      placeholder="0000-0002-1825-0097"
+                      placeholder="0000-0000-0000-0000"
                       value={formOrcid}
-                      onChange={(e) => setFormOrcid(e.target.value)}
-                      className="bg-midnight border border-paper/15 text-paper p-2.5 rounded-sm focus:outline-none focus:border-blood font-mono text-xs"
+                      onChange={(e) => {
+                        clearMemberError('orcid');
+                        setFormOrcid(e.target.value);
+                      }}
+                      className={`bg-midnight border text-paper p-2.5 rounded-sm focus:outline-none font-mono text-xs ${
+                        memberErrors.orcid ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                      }`}
                     />
                   </div>
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <label className="font-sans text-[9px] font-bold uppercase tracking-wider text-paper/40">
-                    Scholarly Credentials / Title
-                  </label>
+                  <div className="flex justify-between items-center">
+                    <label className="font-sans text-[9px] font-bold uppercase tracking-wider text-paper/40">
+                      Scholarly Credentials / Title
+                    </label>
+                    {memberErrors.credentials && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {memberErrors.credentials}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
-                    placeholder="e.g. D.Phil, Reader in Quantitative Forensic Profiling"
+                    placeholder="e.g. Senior Researcher, Ph.D., Fellow"
                     value={formCredentials}
-                    onChange={(e) => setFormCredentials(e.target.value)}
-                    className="bg-midnight border border-paper/15 text-paper p-2.5 rounded-sm focus:outline-none focus:border-blood font-serif"
+                    onChange={(e) => {
+                      clearMemberError('credentials');
+                      setFormCredentials(e.target.value);
+                    }}
+                    className={`bg-midnight border text-paper p-2.5 rounded-sm focus:outline-none font-serif ${
+                      memberErrors.credentials ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                    }`}
                   />
                 </div>
 
@@ -560,15 +667,27 @@ export default function EditorialTeamManager({
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <label className="font-sans text-[9px] font-bold uppercase tracking-wider text-paper/40">
-                    Scholar Biography / Profile Description
-                  </label>
+                  <div className="flex justify-between items-center">
+                    <label className="font-sans text-[9px] font-bold uppercase tracking-wider text-paper/40">
+                      Scholar Biography / Profile Description
+                    </label>
+                    {memberErrors.bio && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {memberErrors.bio}
+                      </span>
+                    )}
+                  </div>
                   <textarea
                     rows={3}
-                    placeholder="Brief background on researcher focus areas and investigations..."
+                    placeholder="Brief background on researcher focus areas, academic methodology, and investigations..."
                     value={formBio}
-                    onChange={(e) => setFormBio(e.target.value)}
-                    className="bg-midnight border border-paper/15 text-paper p-2.5 rounded-sm focus:outline-none focus:border-blood font-serif resize-none"
+                    onChange={(e) => {
+                      clearMemberError('bio');
+                      setFormBio(e.target.value);
+                    }}
+                    className={`bg-midnight border text-paper p-2.5 rounded-sm focus:outline-none font-serif resize-none ${
+                      memberErrors.bio ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                    }`}
                   />
                 </div>
 

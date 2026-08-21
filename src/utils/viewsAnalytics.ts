@@ -150,52 +150,12 @@ export async function fetchContributorViewsLogAnalytics(
       }
     });
   } catch (err) {
-    console.warn('Could not query views_log from Firestore, falling back to synthesised telemetry:', err);
+    console.warn('Could not query views_log from Firestore:', err);
     isLive = false;
   }
 
-  // If there are few or no logs recorded in views_log for these articles,
-  // we generate realistic historical telemetry distribution based on each article's total views
   const now = Date.now();
   const dayMs = 86400000;
-
-  if (rawLogs.length === 0 && authorArticles.length > 0) {
-    const defaultReferrers = [
-      'https://scholar.google.com/citations',
-      'direct',
-      'https://theoligarchy.in/treatises',
-      'https://twitter.com/theoligarchy_in',
-      'https://doi.org/10.5281/zenodo.10892341',
-      'https://linkedin.com/pulse/criminology'
-    ];
-
-    authorArticles.forEach((art, artIdx) => {
-      const artMinutes = extractArticleMinutes(art.readTime, art.content);
-      const targetViews = Math.max(art.views || 0, 12 + (artIdx * 8));
-
-      // Sample a subset of views as logs across the past 30 days
-      const logCount = Math.min(targetViews, 60);
-      for (let i = 0; i < logCount; i++) {
-        const daysAgo = Math.pow(Math.random(), 1.5) * 30; // Weight towards recent days
-        const logTimestamp = now - (daysAgo * dayMs) - Math.floor(Math.random() * 3600000 * 12);
-        const ref = defaultReferrers[Math.floor(Math.random() * defaultReferrers.length)];
-        const completionRatio = 0.55 + (Math.random() * 0.45); // 55% - 100% completion
-        const readSeconds = Math.round(artMinutes * 60 * completionRatio);
-
-        rawLogs.push({
-          id: `synth-log-${art.id}-${i}`,
-          articleId: art.id,
-          articleTitle: art.title,
-          category: art.category || 'politics',
-          timestamp: logTimestamp,
-          readDurationSeconds: readSeconds,
-          referrer: ref,
-          userAgent: Math.random() > 0.3 ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X)' : 'Mozilla/5.0 (iPhone; CPU iPhone OS)',
-          deviceType: Math.random() > 0.4 ? 'desktop' : 'mobile'
-        });
-      }
-    });
-  }
 
   // Sort logs chronologically descending
   rawLogs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -213,8 +173,8 @@ export async function fetchContributorViewsLogAnalytics(
       estimatedMinutes: estMins,
       loggedViews: 0,
       totalReadMinutes: 0,
-      avgReadMinutes: estMins,
-      completionRatePercent: 76.5,
+      avgReadMinutes: 0,
+      completionRatePercent: 0,
       lastViewedAt: null,
       topReferrers: []
     };
@@ -274,14 +234,14 @@ export async function fetchContributorViewsLogAnalytics(
       stat.avgReadMinutes = Number((stat.totalReadMinutes / stat.loggedViews).toFixed(1));
       stat.completionRatePercent = Number(Math.min(98, Math.max(50, (stat.avgReadMinutes / stat.estimatedMinutes) * 100)).toFixed(1));
     } else {
-      // Baseline defaults based on article view count
+      // If no detailed view logs recorded, rely solely on article's total views
       const art = articleMap.get(stat.articleId);
       const views = art?.views || 0;
       stat.loggedViews = views;
-      stat.totalReadMinutes = Math.round(views * stat.estimatedMinutes * 0.82);
-      stat.avgReadMinutes = Number((stat.estimatedMinutes * 0.82).toFixed(1));
-      stat.completionRatePercent = 78.4;
-      stat.lastViewedAt = now - Math.floor(Math.random() * dayMs * 3);
+      stat.totalReadMinutes = 0;
+      stat.avgReadMinutes = 0;
+      stat.completionRatePercent = 0;
+      stat.lastViewedAt = null;
     }
 
     const refMap = articleReferrerCounts[stat.articleId] || {};
@@ -335,8 +295,10 @@ export async function fetchContributorViewsLogAnalytics(
   const totalLoggedViews = rawLogs.length || authorArticles.reduce((acc, a) => acc + (a.views || 0), 0);
   const totalReadTimeMinutes = Object.values(perArticleAnalytics).reduce((sum, a) => sum + a.totalReadMinutes, 0);
   const totalReadHours = Number((totalReadTimeMinutes / 60).toFixed(1));
-  const avgReadDurationMinutes = totalLoggedViews > 0 ? Number((totalReadTimeMinutes / totalLoggedViews).toFixed(1)) : 8.2;
-  const completionRatePercent = 77.2;
+  const avgReadDurationMinutes = totalLoggedViews > 0 ? Number((totalReadTimeMinutes / totalLoggedViews).toFixed(1)) : 0;
+  const completionRatePercent = totalLoggedViews > 0 
+    ? Number((Object.values(perArticleAnalytics).reduce((s, a) => s + (a.completionRatePercent || 0), 0) / (Object.values(perArticleAnalytics).filter(a => a.loggedViews > 0).length || 1)).toFixed(1))
+    : 0;
 
   // Referrers List
   const totalRefs = Object.values(refCountsOverall).reduce((a, b) => a + b, 0) || 1;

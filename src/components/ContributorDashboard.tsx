@@ -142,8 +142,6 @@ export default function ContributorDashboard({
   const [viewsLogAnalytics, setViewsLogAnalytics] = useState<ContributorViewsAnalytics | null>(null);
   const [isViewsLogLoading, setIsViewsLogLoading] = useState(false);
   const [viewsTimeWindow, setViewsTimeWindow] = useState<'7d' | '14d' | '30d'>('7d');
-  const [simulatingPing, setSimulatingPing] = useState(false);
-  const [simulationSuccessMsg, setSimulationSuccessMsg] = useState<string | null>(null);
 
   // Selected Paper for Deep-Dive Analytics Modal
   const [selectedPaperForMetrics, setSelectedPaperForMetrics] = useState<Article | null>(null);
@@ -243,48 +241,16 @@ export default function ContributorDashboard({
     };
   }, [authorEmail, authorDisplayName, authorArticles, loadViewsLogData]);
 
-  const handleSimulateLiveTelemetryPing = async () => {
-    if (authorArticles.length === 0) return;
-    setSimulatingPing(true);
-    try {
-      const targetArticle = authorArticles.find(a => a.status === 'published') || authorArticles[0];
-      const testSources = [
-        'https://scholar.google.com/citations?view_op=view_citation',
-        'https://doi.org/10.5281/zenodo.10892341',
-        'https://theoligarchy.in/treatises',
-        'https://twitter.com/theoligarchy_in'
-      ];
-      const randomSrc = testSources[Math.floor(Math.random() * testSources.length)];
-      const estSecs = (extractArticleMinutes(targetArticle.readTime, targetArticle.content) * 60);
-
-      await logArticleReadEvent(
-        targetArticle,
-        activeResearcher.id,
-        authorEmail,
-        Math.round(estSecs * (0.65 + Math.random() * 0.35)),
-        randomSrc
-      );
-
-      await loadViewsLogData();
-      setSimulationSuccessMsg(`Live telemetry record logged to Firestore 'views_log' for "${targetArticle.title.slice(0, 32)}..."!`);
-      setTimeout(() => setSimulationSuccessMsg(null), 4000);
-    } catch (err) {
-      console.error('Simulation error:', err);
-    } finally {
-      setSimulatingPing(false);
-    }
-  };
-
   const stats = statsData?.stats || {
     totalArticles: authorArticles.length,
     publishedCount: authorArticles.filter(a => a.status === 'published').length,
     draftsCount: authorArticles.filter(a => a.status === 'draft').length,
     totalViews: authorArticles.reduce((acc, a) => acc + (a.views || 0), 0),
-    totalBookmarks: Math.max(12, Math.floor(authorArticles.reduce((acc, a) => acc + (a.views || 0), 0) * 0.05)),
-    totalPeerAnnotations: Math.max(8, Math.floor(authorArticles.reduce((acc, a) => acc + (a.views || 0), 0) * 0.03)),
-    totalCitationsGenerated: authorArticles.reduce((acc, a) => acc + Math.max(3, Math.floor((a.views || 0) * 0.08)), 0),
-    openRevisionNotesCount: 1,
-    resolvedRevisionNotesCount: 4
+    totalBookmarks: 0,
+    totalPeerAnnotations: 0,
+    totalCitationsGenerated: 0,
+    openRevisionNotesCount: (statsData?.notesList || []).filter(n => n.status === 'open').length,
+    resolvedRevisionNotesCount: (statsData?.notesList || []).filter(n => n.status === 'resolved').length
   };
 
   const perArticleMetrics = statsData?.perArticleMetrics || {};
@@ -332,13 +298,13 @@ export default function ContributorDashboard({
     pubList.forEach(a => {
       const m = perArticleMetrics[a.id] || {
         views: a.views || 0,
-        citations: Math.max(3, Math.floor((a.views || 0) * 0.08)),
-        bookmarks: Math.max(2, Math.floor((a.views || 0) * 0.04)),
-        annotations: Math.max(1, Math.floor((a.views || 0) * 0.02))
+        citations: 0,
+        bookmarks: 0,
+        annotations: 0
       };
-      totalBookmarks += m.bookmarks;
-      totalCitations += m.citations;
-      totalAnnotations += m.annotations;
+      totalBookmarks += (m.bookmarks || 0);
+      totalCitations += (m.citations || 0);
+      totalAnnotations += (m.annotations || 0);
     });
 
     const totalEngagementInteractions = totalBookmarks + totalCitations + totalAnnotations;
@@ -479,9 +445,9 @@ export default function ContributorDashboard({
 THE OLIGARCHY — SCHOLARLY IMPACT DOSSIER
 =====================================================
 Researcher: ${activeResearcher.name}
-Role: ${activeResearcher.role || 'Guest Researcher'}
-Institution: ${activeResearcher.institution || 'Independent Research'}
-ORCID: ${activeResearcher.orcid || '0000-0002-1825-0097'}
+Role: ${activeResearcher.role || 'Contributor'}
+Institution: ${activeResearcher.institution || 'The Oligarchy'}
+ORCID: ${activeResearcher.orcid || 'Unregistered'}
 Verified Email: ${authorEmail}
 Date Generated: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
 
@@ -496,11 +462,11 @@ AGGREGATED RESEARCH IMPACT METRICS
 INDIVIDUAL TREATISE PERFORMANCE BREAKDOWN
 -----------------------------------------------------
 ${authorArticles.map((art, idx) => {
-  const m = perArticleMetrics[art.id] || { views: art.views || 0, citations: Math.max(3, Math.floor((art.views || 0) * 0.08)), bookmarks: Math.max(2, Math.floor((art.views || 0) * 0.04)), annotations: Math.max(1, Math.floor((art.views || 0) * 0.02)) };
+  const m = perArticleMetrics[art.id] || { views: art.views || 0, citations: 0, bookmarks: 0, annotations: 0 };
   return `${idx + 1}. "${art.title}"
    Category: ${art.category.toUpperCase()} | Status: ${art.status.toUpperCase()} | Read Time: ${art.readTime || '8 min'}
    • Views: ${m.views.toLocaleString()}
-   • Est. Citations: ${m.citations}
+   • Citations: ${m.citations}
    • Reader Bookmarks: ${m.bookmarks}
    • Marginalia Annotations: ${m.annotations}
    • Permanent DOI: ${art.doi || '10.5281/zenodo.10892341'}
@@ -911,16 +877,6 @@ https://theoligarchy.in
               </button>
 
               <button
-                onClick={handleSimulateLiveTelemetryPing}
-                disabled={simulatingPing || publishedArticles.length === 0}
-                className="bg-paper/5 hover:bg-paper/15 border border-paper/20 hover:border-blood/50 text-paper font-sans text-[9px] font-bold tracking-wider uppercase px-3 py-2 rounded-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all disabled:opacity-50"
-                title="Emit a live simulated read event into views_log collection"
-              >
-                <Radio size={11} className={simulatingPing ? 'animate-ping text-green-400' : 'text-green-400'} />
-                <span>{simulatingPing ? 'Logging...' : 'Simulate Read Ping'}</span>
-              </button>
-
-              <button
                 onClick={handleExportMetricsDossier}
                 className="bg-blood hover:bg-blood-light text-paper font-sans text-[9px] font-bold tracking-wider uppercase px-3.5 py-2 rounded-xs flex items-center gap-1.5 cursor-pointer shadow transition-all"
               >
@@ -928,22 +884,6 @@ https://theoligarchy.in
               </button>
             </div>
           </div>
-
-          {/* Simulation Feedback Alert */}
-          {simulationSuccessMsg && (
-            <div className="bg-green-950/40 border border-green-600/40 px-4 py-2.5 rounded-xs flex items-center justify-between gap-3 text-green-300 text-xs font-serif fade-in">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-green-400 shrink-0" />
-                <span>{simulationSuccessMsg}</span>
-              </div>
-              <button 
-                onClick={() => setSimulationSuccessMsg(null)}
-                className="text-green-400 hover:text-white cursor-pointer"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          )}
 
           {/* ══ 4 CORE AGGREGATED TELEMETRY METRIC PILLARS ══ */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

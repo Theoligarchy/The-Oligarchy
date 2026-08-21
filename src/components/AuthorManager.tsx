@@ -6,6 +6,8 @@ import {
   toggleContributorVisibility, 
   resolveSocialUrl 
 } from '../utils/contributors';
+import { validateContributorForm } from '../utils/formValidation';
+import { EmptyState } from './EmptyState';
 import { 
   Users, 
   UserPlus, 
@@ -58,6 +60,16 @@ export default function AuthorManager({
   const [editingAuthor, setEditingAuthor] = useState<AuthorProfile | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [alert, setAlert] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [authorErrors, setAuthorErrors] = useState<Record<string, string>>({});
+
+  const clearAuthorError = (field: string) => {
+    setAuthorErrors(prev => {
+      if (!prev[field]) return prev;
+      const copy = { ...prev };
+      delete copy[field];
+      return copy;
+    });
+  };
 
   // Custom modal for delete confirmation
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -125,9 +137,10 @@ export default function AuthorManager({
   // Open Create Modal
   const handleOpenCreate = () => {
     setEditingAuthor(null);
+    setAuthorErrors({});
     setName('');
     setSlug('');
-    setRole('Guest Researcher');
+    setRole('');
     setBio('');
     setProfileImage('');
     setInstitution('');
@@ -138,7 +151,7 @@ export default function AuthorManager({
     setIsVisible(true);
     setDisplayOrder(contributors.length + 1);
     setJoinedDate(new Date().getFullYear().toString());
-    setSpecializations(['Criminology', 'Behavioral Psychology']);
+    setSpecializations([]);
     setSpecInput('');
     setInstagram('');
     setTwitter('');
@@ -154,6 +167,7 @@ export default function AuthorManager({
   // Open Edit Modal
   const handleOpenEdit = (author: AuthorProfile) => {
     setEditingAuthor(author);
+    setAuthorErrors({});
     setName(author.name || '');
     setSlug(author.slug || author.id);
     setRole(author.role || '');
@@ -184,6 +198,7 @@ export default function AuthorManager({
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setName(val);
+    clearAuthorError('name');
     if (!editingAuthor || !slug || slug === editingAuthor.id) {
       const generatedSlug = val
         .toLowerCase()
@@ -195,9 +210,10 @@ export default function AuthorManager({
 
   // Add Specialization Tag
   const handleAddSpec = () => {
-    if (!specInput.trim()) return;
-    if (!specializations.includes(specInput.trim())) {
-      setSpecializations([...specializations, specInput.trim()]);
+    const trimmed = specInput.trim();
+    if (!trimmed) return;
+    if (!specializations.includes(trimmed)) {
+      setSpecializations([...specializations, trimmed]);
     }
     setSpecInput('');
   };
@@ -209,43 +225,73 @@ export default function AuthorManager({
   // Save Author
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !role.trim()) {
-      setAlert({ text: 'Author Name and Academic Role / Title are mandatory.', type: 'error' });
-      return;
-    }
 
     const cleanId = editingAuthor?.id || slug.trim() || name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
+    const validation = validateContributorForm({
+      name,
+      slug: slug.trim() || cleanId,
+      role,
+      bio,
+      profileImage,
+      institution,
+      credentials,
+      orcid,
+      email: contactEmail || email,
+      specializations,
+      instagram,
+      twitter,
+      linkedin,
+      website,
+      googleScholar,
+      researchGate,
+      ssrn,
+      contactEmail,
+      displayOrder,
+      isVisible,
+      isFounder,
+      joinedDate
+    });
+
+    if (!validation.isValid) {
+      setAuthorErrors(validation.errors);
+      const firstError = Object.values(validation.errors)[0];
+      setAlert({ text: `Validation Error: ${firstError}`, type: 'error' });
+      return;
+    }
+
+    setAuthorErrors({});
+
     const profileData: AuthorProfile = {
       id: cleanId,
-      slug: slug.trim() || cleanId,
-      name: name.trim(),
-      role: role.trim(),
-      bio: bio.trim(),
-      profileImage: profileImage.trim() || undefined,
-      avatarUrl: profileImage.trim() || undefined,
-      institution: institution.trim() || undefined,
-      credentials: credentials.trim() || undefined,
-      orcid: orcid.trim() || undefined,
-      email: contactEmail.trim() || email.trim() || undefined,
-      specializations,
-      researchAreas: specializations,
-      affiliations: institution.trim() ? [institution.trim()] : [],
-      tags: specializations,
+      slug: validation.sanitized.slug || cleanId,
+      name: validation.sanitized.name,
+      role: validation.sanitized.role,
+      bio: validation.sanitized.bio || '',
+      profileImage: validation.sanitized.profileImage || undefined,
+      avatarUrl: validation.sanitized.profileImage || undefined,
+      institution: validation.sanitized.institution || undefined,
+      credentials: validation.sanitized.credentials || undefined,
+      orcid: validation.sanitized.orcid || undefined,
+      email: validation.sanitized.email || undefined,
+      specializations: validation.sanitized.specializations,
+      researchAreas: validation.sanitized.specializations,
+      affiliations: validation.sanitized.institution ? [validation.sanitized.institution] : [],
+      tags: validation.sanitized.specializations,
       socials: {
-        instagram: instagram.trim() || undefined,
-        twitter: twitter.trim() || undefined,
-        linkedin: linkedin.trim() || undefined,
-        website: website.trim() || undefined,
-        googleScholar: googleScholar.trim() || undefined,
-        researchGate: researchGate.trim() || undefined,
-        ssrn: ssrn.trim() || undefined,
-        email: contactEmail.trim() || undefined
+        instagram: validation.sanitized.socials?.instagram || undefined,
+        twitter: validation.sanitized.socials?.twitter || undefined,
+        linkedin: validation.sanitized.socials?.linkedin || undefined,
+        website: validation.sanitized.socials?.website || undefined,
+        googleScholar: validation.sanitized.socials?.googleScholar || undefined,
+        researchGate: validation.sanitized.socials?.researchGate || undefined,
+        ssrn: validation.sanitized.socials?.ssrn || undefined,
+        email: validation.sanitized.socials?.email || undefined
       },
-      isVisible,
-      displayOrder: Number(displayOrder) || 99,
-      isFounder,
-      joinedDate: joinedDate.trim() || new Date().getFullYear().toString(),
+      isVisible: validation.sanitized.isVisible,
+      displayOrder: validation.sanitized.displayOrder,
+      isFounder: validation.sanitized.isFounder,
+      joinedDate: validation.sanitized.joinedDate || new Date().getFullYear().toString(),
       createdAt: editingAuthor?.createdAt || Date.now(),
       updatedAt: Date.now()
     };
@@ -624,10 +670,49 @@ export default function AuthorManager({
         })}
 
         {filteredContributors.length === 0 && (
-          <div className="col-span-full bg-ink/40 border border-paper/10 p-12 text-center rounded-sm">
-            <Users size={32} className="mx-auto text-paper/20 mb-3" />
-            <h4 className="font-serif text-base text-paper/80 font-bold">No contributors match your filter.</h4>
-            <p className="font-serif text-xs text-paper/50 mt-1">Try adjusting the search query or visibility filter.</p>
+          <div className="col-span-full">
+            {contributors.length === 0 ? (
+              <EmptyState
+                icon={Users}
+                badge="SCHOLARLY REGISTRY EMPTY"
+                title="No Contributor Profiles Established"
+                description="The academic registry currently holds zero scholar profiles. Register academic fellows, guest writers, and forensic analysts to generate public mastheads and author bylines."
+                action={{
+                  label: 'Register First Contributor',
+                  onClick: handleOpenCreate,
+                  icon: UserPlus
+                }}
+                hints={[
+                  'Profiles created will appear on the public contributors directory and masthead',
+                  'Assign custom research areas, verified ORCID identifiers, and institutional affiliations',
+                  'Associate articles with registered contributors for automatic scholarly attribution'
+                ]}
+              />
+            ) : (
+              <EmptyState
+                icon={Search}
+                badge="ZERO MATCHES"
+                title="No Contributors Match Active Filter"
+                description={
+                  searchQuery 
+                    ? `No academic profiles matched query "${searchQuery}" under ${filterVisibility} visibility.`
+                    : `No academic profiles found under the "${filterVisibility}" visibility status.`
+                }
+                action={{
+                  label: 'Reset Filter & Search',
+                  onClick: () => {
+                    setSearchQuery('');
+                    setFilterVisibility('all');
+                  },
+                  icon: RefreshCw
+                }}
+                secondaryAction={{
+                  label: 'Add New Contributor',
+                  onClick: handleOpenCreate,
+                  icon: UserPlus
+                }}
+              />
+            )}
           </div>
         )}
       </div>
@@ -672,45 +757,77 @@ export default function AuthorManager({
                 {/* Basic Identity: Name, Slug, Role */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="flex flex-col gap-1.5 md:col-span-1">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
-                      Author Full Name *
-                    </label>
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
+                        Author Full Name *
+                      </label>
+                      {authorErrors.name && (
+                        <span className="font-sans text-[9px] font-bold text-red-400">
+                          {authorErrors.name}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. Dr. Julian Vance"
+                      placeholder="Scholar / Contributor Full Name"
                       value={name}
                       onChange={handleNameChange}
-                      className="bg-ink border border-paper/15 rounded-xs p-2 text-paper font-serif focus:outline-none focus:border-blood"
+                      className={`bg-ink border rounded-xs p-2 text-paper font-serif focus:outline-none ${
+                        authorErrors.name ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                      }`}
                     />
                   </div>
 
                   <div className="flex flex-col gap-1.5 md:col-span-1">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60 flex items-center justify-between">
-                      <span>Unique ID / Slug *</span>
-                      <span className="font-mono text-[8px] text-paper/30">URL safe</span>
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60 flex items-center justify-between">
+                        <span>Unique ID / Slug *</span>
+                      </label>
+                      {authorErrors.slug ? (
+                        <span className="font-sans text-[9px] font-bold text-red-400">{authorErrors.slug}</span>
+                      ) : (
+                        <span className="font-mono text-[8px] text-paper/30">URL safe</span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. julian-vance"
+                      placeholder="author-slug-id"
                       value={slug}
-                      onChange={(e) => setSlug(e.target.value)}
-                      className="bg-ink border border-paper/15 rounded-xs p-2 text-paper font-mono text-[11px] focus:outline-none focus:border-blood"
+                      onChange={(e) => {
+                        clearAuthorError('slug');
+                        setSlug(e.target.value);
+                      }}
+                      className={`bg-ink border rounded-xs p-2 text-paper font-mono text-[11px] focus:outline-none ${
+                        authorErrors.slug ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                      }`}
                     />
                   </div>
 
                   <div className="flex flex-col gap-1.5 md:col-span-1">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
-                      Role / Title *
-                    </label>
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
+                        Role / Title *
+                      </label>
+                      {authorErrors.role && (
+                        <span className="font-sans text-[9px] font-bold text-red-400">
+                          {authorErrors.role}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. Senior Fellow, Forensic Criminology"
+                      placeholder="Academic or Editorial Title"
                       value={role}
-                      onChange={(e) => setRole(e.target.value)}
-                      className="bg-ink border border-paper/15 rounded-xs p-2 text-paper font-serif focus:outline-none focus:border-blood"
+                      onChange={(e) => {
+                        clearAuthorError('role');
+                        setRole(e.target.value);
+                      }}
+                      className={`bg-ink border rounded-xs p-2 text-paper font-serif focus:outline-none ${
+                        authorErrors.role ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                      }`}
                     />
                   </div>
                 </div>
@@ -739,15 +856,27 @@ export default function AuthorManager({
                   </div>
 
                   <div className="flex flex-col gap-1.5 md:col-span-3">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
-                      Profile Image / Avatar URL
-                    </label>
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
+                        Profile Image / Avatar URL
+                      </label>
+                      {authorErrors.profileImage && (
+                        <span className="font-sans text-[9px] font-bold text-red-400">
+                          {authorErrors.profileImage}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="url"
-                      placeholder="https://images.unsplash.com/... or direct image URL"
+                      placeholder="https://... direct image URL"
                       value={profileImage}
-                      onChange={(e) => setProfileImage(e.target.value)}
-                      className="bg-ink border border-paper/15 rounded-xs p-2 text-paper font-mono text-[11px] focus:outline-none focus:border-blood"
+                      onChange={(e) => {
+                        clearAuthorError('profileImage');
+                        setProfileImage(e.target.value);
+                      }}
+                      className={`bg-ink border rounded-xs p-2 text-paper font-mono text-[11px] focus:outline-none ${
+                        authorErrors.profileImage ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                      }`}
                     />
                     <span className="text-[10px] text-paper/40 font-serif">
                       Leave empty to automatically display a classic scholarly initials badge.
@@ -758,72 +887,129 @@ export default function AuthorManager({
                 {/* Academic Credentials & Institution */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="flex flex-col gap-1.5">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
-                      Academic Institution / Affiliation
-                    </label>
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
+                        Academic Institution / Affiliation
+                      </label>
+                      {authorErrors.institution && (
+                        <span className="font-sans text-[9px] font-bold text-red-400">
+                          {authorErrors.institution}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
-                      placeholder="e.g. Oxford Centre for Criminology"
+                      placeholder="e.g. University, Research Institute, or Think Tank"
                       value={institution}
-                      onChange={(e) => setInstitution(e.target.value)}
-                      className="bg-ink border border-paper/15 rounded-xs p-2 text-paper font-serif focus:outline-none focus:border-blood"
+                      onChange={(e) => {
+                        clearAuthorError('institution');
+                        setInstitution(e.target.value);
+                      }}
+                      className={`bg-ink border rounded-xs p-2 text-paper font-serif focus:outline-none ${
+                        authorErrors.institution ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                      }`}
                     />
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
-                      Degrees &amp; Credentials
-                    </label>
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
+                        Degrees &amp; Credentials
+                      </label>
+                      {authorErrors.credentials && (
+                        <span className="font-sans text-[9px] font-bold text-red-400">
+                          {authorErrors.credentials}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
-                      placeholder="e.g. Ph.D. (Cantab), LL.M, Forensic Fellow"
+                      placeholder="e.g. Ph.D., LL.M, Research Fellow"
                       value={credentials}
-                      onChange={(e) => setCredentials(e.target.value)}
-                      className="bg-ink border border-paper/15 rounded-xs p-2 text-paper font-serif focus:outline-none focus:border-blood"
+                      onChange={(e) => {
+                        clearAuthorError('credentials');
+                        setCredentials(e.target.value);
+                      }}
+                      className={`bg-ink border rounded-xs p-2 text-paper font-serif focus:outline-none ${
+                        authorErrors.credentials ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                      }`}
                     />
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60 flex items-center justify-between">
-                      <span>ORCID iD Identifier</span>
-                      <span className="font-mono text-[8px] text-[#a6ce39]">Verified</span>
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60 flex items-center justify-between">
+                        <span>ORCID iD Identifier</span>
+                      </label>
+                      {authorErrors.orcid ? (
+                        <span className="font-sans text-[9px] font-bold text-red-400">{authorErrors.orcid}</span>
+                      ) : (
+                        <span className="font-mono text-[8px] text-[#a6ce39]">Verified</span>
+                      )}
+                    </div>
                     <input
                       type="text"
-                      placeholder="0000-0002-1825-0097"
+                      placeholder="0000-0000-0000-0000"
                       value={orcid}
-                      onChange={(e) => setOrcid(e.target.value)}
-                      className="bg-ink border border-paper/15 rounded-xs p-2 text-paper font-mono text-[11px] focus:outline-none focus:border-blood"
+                      onChange={(e) => {
+                        clearAuthorError('orcid');
+                        setOrcid(e.target.value);
+                      }}
+                      className={`bg-ink border rounded-xs p-2 text-paper font-mono text-[11px] focus:outline-none ${
+                        authorErrors.orcid ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                      }`}
                     />
                   </div>
                 </div>
 
                 {/* Biography */}
                 <div className="flex flex-col gap-1.5">
-                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
-                    Scholarly Biography &amp; Research Dossier *
-                  </label>
+                  <div className="flex justify-between items-center">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
+                      Scholarly Biography &amp; Research Dossier *
+                    </label>
+                    {authorErrors.bio && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {authorErrors.bio}
+                      </span>
+                    )}
+                  </div>
                   <textarea
                     rows={4}
                     required
-                    placeholder="Write a concise overview of the researcher's background, methodology, and focus..."
+                    placeholder="Provide a concise scholarly overview of the researcher's background, methodology, and focus..."
                     value={bio}
-                    onChange={(e) => setBio(e.target.value)}
-                    className="bg-ink border border-paper/15 rounded-xs p-3 text-paper font-serif leading-relaxed focus:outline-none focus:border-blood"
+                    onChange={(e) => {
+                      clearAuthorError('bio');
+                      setBio(e.target.value);
+                    }}
+                    className={`bg-ink border rounded-xs p-3 text-paper font-serif leading-relaxed focus:outline-none ${
+                      authorErrors.bio ? 'border-red-500/80 focus:border-red-400' : 'border-paper/15 focus:border-blood'
+                    }`}
                   />
                 </div>
 
                 {/* Specializations / Research Tags Input */}
                 <div className="flex flex-col gap-2">
-                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
-                    Research Areas &amp; Specializations
-                  </label>
+                  <div className="flex justify-between items-center">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60">
+                      Research Areas &amp; Specializations
+                    </label>
+                    {authorErrors.specializations && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {authorErrors.specializations}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      placeholder="Add area (e.g. Offender Profiling, State Surveillance)..."
+                      placeholder="Add research discipline or focus area..."
                       value={specInput}
-                      onChange={(e) => setSpecInput(e.target.value)}
+                      onChange={(e) => {
+                        clearAuthorError('specializations');
+                        setSpecInput(e.target.value);
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
@@ -867,68 +1053,97 @@ export default function AuthorManager({
                   </span>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="flex items-center gap-2 bg-ink p-1.5 border border-paper/10 rounded-xs">
+                    <div className={`flex items-center gap-2 bg-ink p-1.5 border rounded-xs ${
+                      authorErrors.linkedin ? 'border-red-500/80' : 'border-paper/10'
+                    }`}>
                       <Linkedin size={14} className="text-paper/40 shrink-0 ml-1.5" />
                       <input
                         type="text"
                         placeholder="LinkedIn Profile URL or Handle"
                         value={linkedin}
-                        onChange={(e) => setLinkedin(e.target.value)}
+                        onChange={(e) => {
+                          clearAuthorError('linkedin');
+                          setLinkedin(e.target.value);
+                        }}
                         className="w-full bg-transparent text-paper font-serif text-[11px] focus:outline-none"
                       />
                     </div>
 
-                    <div className="flex items-center gap-2 bg-ink p-1.5 border border-paper/10 rounded-xs">
+                    <div className={`flex items-center gap-2 bg-ink p-1.5 border rounded-xs ${
+                      authorErrors.twitter ? 'border-red-500/80' : 'border-paper/10'
+                    }`}>
                       <Twitter size={14} className="text-paper/40 shrink-0 ml-1.5" />
                       <input
                         type="text"
                         placeholder="Twitter / X handle or URL"
                         value={twitter}
-                        onChange={(e) => setTwitter(e.target.value)}
+                        onChange={(e) => {
+                          clearAuthorError('twitter');
+                          setTwitter(e.target.value);
+                        }}
                         className="w-full bg-transparent text-paper font-serif text-[11px] focus:outline-none"
                       />
                     </div>
 
-                    <div className="flex items-center gap-2 bg-ink p-1.5 border border-paper/10 rounded-xs">
+                    <div className={`flex items-center gap-2 bg-ink p-1.5 border rounded-xs ${
+                      authorErrors.instagram ? 'border-red-500/80' : 'border-paper/10'
+                    }`}>
                       <Instagram size={14} className="text-paper/40 shrink-0 ml-1.5" />
                       <input
                         type="text"
                         placeholder="Instagram handle or URL"
                         value={instagram}
-                        onChange={(e) => setInstagram(e.target.value)}
+                        onChange={(e) => {
+                          clearAuthorError('instagram');
+                          setInstagram(e.target.value);
+                        }}
                         className="w-full bg-transparent text-paper font-serif text-[11px] focus:outline-none"
                       />
                     </div>
 
-                    <div className="flex items-center gap-2 bg-ink p-1.5 border border-paper/10 rounded-xs">
+                    <div className={`flex items-center gap-2 bg-ink p-1.5 border rounded-xs ${
+                      authorErrors.website ? 'border-red-500/80' : 'border-paper/10'
+                    }`}>
                       <Globe size={14} className="text-paper/40 shrink-0 ml-1.5" />
                       <input
                         type="text"
                         placeholder="Personal Website / Portfolio URL"
                         value={website}
-                        onChange={(e) => setWebsite(e.target.value)}
+                        onChange={(e) => {
+                          clearAuthorError('website');
+                          setWebsite(e.target.value);
+                        }}
                         className="w-full bg-transparent text-paper font-serif text-[11px] focus:outline-none"
                       />
                     </div>
 
-                    <div className="flex items-center gap-2 bg-ink p-1.5 border border-paper/10 rounded-xs">
+                    <div className={`flex items-center gap-2 bg-ink p-1.5 border rounded-xs ${
+                      authorErrors.googleScholar ? 'border-red-500/80' : 'border-paper/10'
+                    }`}>
                       <GraduationCap size={14} className="text-paper/40 shrink-0 ml-1.5" />
                       <input
                         type="text"
                         placeholder="Google Scholar Profile URL"
                         value={googleScholar}
-                        onChange={(e) => setGoogleScholar(e.target.value)}
+                        onChange={(e) => {
+                          clearAuthorError('googleScholar');
+                          setGoogleScholar(e.target.value);
+                        }}
                         className="w-full bg-transparent text-paper font-serif text-[11px] focus:outline-none"
                       />
                     </div>
 
-                    <div className="flex items-center gap-2 bg-ink p-1.5 border border-paper/10 rounded-xs">
+                    <div className={`flex items-center gap-2 bg-ink p-1.5 border rounded-xs ${
+                      authorErrors.researchGate ? 'border-red-500/80' : 'border-paper/10'
+                    }`}>
                       <BookOpen size={14} className="text-paper/40 shrink-0 ml-1.5" />
                       <input
                         type="text"
                         placeholder="ResearchGate or SSRN URL"
                         value={researchGate || ssrn}
                         onChange={(e) => {
+                          clearAuthorError('researchGate');
+                          clearAuthorError('ssrn');
                           setResearchGate(e.target.value);
                           setSsrn(e.target.value);
                         }}
@@ -936,17 +1151,28 @@ export default function AuthorManager({
                       />
                     </div>
 
-                    <div className="flex items-center gap-2 bg-ink p-1.5 border border-paper/10 rounded-xs md:col-span-2">
+                    <div className={`flex items-center gap-2 bg-ink p-1.5 border rounded-xs md:col-span-2 ${
+                      authorErrors.contactEmail || authorErrors.email ? 'border-red-500/80' : 'border-paper/10'
+                    }`}>
                       <Mail size={14} className="text-paper/40 shrink-0 ml-1.5" />
                       <input
                         type="email"
                         placeholder="Direct Contact Email (optional)"
                         value={contactEmail}
-                        onChange={(e) => setContactEmail(e.target.value)}
+                        onChange={(e) => {
+                          clearAuthorError('contactEmail');
+                          clearAuthorError('email');
+                          setContactEmail(e.target.value);
+                        }}
                         className="w-full bg-transparent text-paper font-serif text-[11px] focus:outline-none"
                       />
                     </div>
                   </div>
+                  {(authorErrors.linkedin || authorErrors.twitter || authorErrors.instagram || authorErrors.website || authorErrors.googleScholar || authorErrors.researchGate || authorErrors.contactEmail) && (
+                    <span className="font-sans text-[9px] font-bold text-red-400 block mt-1">
+                      {authorErrors.linkedin || authorErrors.twitter || authorErrors.instagram || authorErrors.website || authorErrors.googleScholar || authorErrors.researchGate || authorErrors.contactEmail}
+                    </span>
+                  )}
                 </div>
 
                 {/* Display Priority, Founder Flag & Visibility Settings */}

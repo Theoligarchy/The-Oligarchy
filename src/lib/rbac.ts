@@ -171,10 +171,9 @@ export async function resolveEditorialUser(authUser: { email?: string | null; ui
       displayName: authUser.displayName || 'Priyasha Priyal Jena',
       role: 'admin',
       authorId: 'priyasha-priyal-jena',
-      institution: 'The Oligarchy Research Group',
-      credentials: 'Founder & Editor-in-Chief · Criminology & Institutional Politics',
-      orcid: '0000-0002-1825-0097',
-      bio: 'Student researcher focusing on criminology, institutional politics, and forensic studies.',
+      institution: 'The Oligarchy',
+      credentials: 'Founder & Editor-in-Chief',
+      bio: 'Founder and Editor of The Oligarchy, an independent research publication exploring crime, psychology, politics, and systems of power.',
       assignedCategories: ['criminology', 'psyche', 'politics'],
       status: 'active'
     };

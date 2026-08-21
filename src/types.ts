@@ -8,8 +8,8 @@ export interface Source {
 export interface CoAuthor {
   name: string;
   role?: string; // e.g. "Co-Author", "Lead Data Analyst", "Methodology Reviewer", "Field Researcher", "Forensic Consultant"
-  institution?: string; // e.g. "Tata Institute of Social Sciences"
-  orcid?: string; // e.g. "0000-0002-1825-0097"
+  institution?: string; // e.g. "Department of Criminology"
+  orcid?: string; // e.g. "0000-0000-0000-0000"
   email?: string;
   bio?: string;
   avatarUrl?: string;
@@ -37,9 +37,9 @@ export interface Article {
   pdfLink?: string; // Research report PDF download link
   authorId: string;
   authorName: string;
-  authorTitle?: string; // e.g. "Senior Fellow in Criminological Sciences"
-  authorInstitution?: string; // e.g. "The Oligarchy Research Group"
-  authorOrcid?: string; // e.g. "0000-0002-1825-0097"
+  authorTitle?: string;
+  authorInstitution?: string;
+  authorOrcid?: string; // e.g. "0000-0000-0000-0000"
   coAuthors?: CoAuthor[]; // Multi-author attribution for investigative series
   doi?: string; // e.g. "10.5281/zenodo.10892341"
   archivalRefId?: string; // e.g. "TOL-2026-PSY-001"
@@ -76,9 +76,9 @@ export interface EditorialUser {
   displayName: string;
   role: EditorialRole;
   authorId?: string; // Links to AuthorProfile (e.g. 'priyasha-priyal-jena')
-  institution?: string; // e.g. "Oxford Criminology Dept"
-  orcid?: string; // e.g. "0000-0002-1825-0097"
-  credentials?: string; // e.g. "PhD Candidate, Forensic Psychology"
+  institution?: string;
+  orcid?: string; // e.g. "0000-0000-0000-0000"
+  credentials?: string;
   bio?: string;
   assignedCategories?: ('criminology' | 'psyche' | 'politics')[];
   createdAt?: number;
@@ -128,8 +128,8 @@ export interface AuthorProfile {
   avatarUrl?: string;
   profileImage?: string; // interchangeable with avatarUrl
   institution?: string;
-  credentials?: string; // e.g. "B.A. LL.B (Hons), Forensic Fellow"
-  orcid?: string; // e.g. "0000-0002-1825-0097"
+  credentials?: string;
+  orcid?: string; // e.g. "0000-0000-0000-0000"
   researchAreas?: string[]; // e.g. ["Pathological Fantasy", "State Bureaucracy", "Forensic Profiling"]
   specializations?: string[]; // alias / compatibility with researchAreas
   affiliations?: string[]; // e.g. ["The Oligarchy Research Group", "Centre for Constitutional Studies"]

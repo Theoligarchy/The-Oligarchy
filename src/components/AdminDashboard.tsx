@@ -21,8 +21,15 @@ import AuthorManager from './AuthorManager';
 import DraftInternalNotes from './DraftInternalNotes';
 import ContributorDashboard from './ContributorDashboard';
 import SiteContentManager from './SiteContentManager';
+import { EmptyState } from './EmptyState';
 import { fetchContributors } from '../utils/contributors';
 import { rbac, ROLE_LABELS, resolveEditorialUser } from '../lib/rbac';
+import { 
+  validateArticleForm, 
+  isPlaceholderText, 
+  validateOrcid, 
+  validateEmail 
+} from '../utils/formValidation';
 import { 
   Plus, 
   FileEdit, 
@@ -56,7 +63,12 @@ import {
   ArrowRight,
   UserCheck,
   Search,
-  Globe
+  Globe,
+  RefreshCw,
+  X,
+  Filter,
+  Inbox,
+  UserPlus
 } from 'lucide-react';
 
 // Helper to recursively scrub undefined values from object payloads before sending to Firestore
@@ -157,6 +169,11 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   const [tips, setTips] = useState<ResearchTip[]>([]);
   const [subscribers, setSubscribers] = useState<any[]>([]);
   
+  // Articles Tab Search & Filter States
+  const [articleSearchQuery, setArticleSearchQuery] = useState('');
+  const [articleCategoryFilter, setArticleCategoryFilter] = useState<'all' | 'criminology' | 'psyche' | 'politics'>('all');
+  const [articleStatusFilter, setArticleStatusFilter] = useState<'all' | 'published' | 'draft'>('all');
+
   // Reading Stack list
   const [readingStack, setReadingStack] = useState<ReadingItem[]>([]);
   const [newBookTitle, setNewBookTitle] = useState('');
@@ -170,6 +187,16 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   // Status/Alert Indicators
   const [alert, setAlert] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [autoSaveActive, setAutoSaveActive] = useState(false);
+  const [articleErrors, setArticleErrors] = useState<Record<string, string>>({});
+
+  const clearArticleError = (field: string) => {
+    setArticleErrors(prev => {
+      if (!prev[field]) return prev;
+      const copy = { ...prev };
+      delete copy[field];
+      return copy;
+    });
+  };
 
   // Gemini AI Category & Tags suggestion state
   const [isSuggestingMetadata, setIsSuggestingMetadata] = useState(false);
@@ -798,12 +825,19 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
   // Source attachment handlers
   const addSourceItem = () => {
-    if (!newSrcTitle.trim()) return;
+    if (!newSrcTitle.trim()) {
+      setAlert({ text: 'Source Title / Reference Citation is required.', type: 'error' });
+      return;
+    }
+    if (isPlaceholderText(newSrcTitle)) {
+      setAlert({ text: 'Source Title contains placeholder text. Please provide an authentic reference citation.', type: 'error' });
+      return;
+    }
     setSources([...sources, {
       category: newSrcCat,
       title: newSrcTitle.trim(),
-      url: newSrcUrl.trim() || undefined,
-      citation: newSrcCitation.trim() || undefined
+      url: (newSrcUrl.trim() && !isPlaceholderText(newSrcUrl)) ? newSrcUrl.trim() : undefined,
+      citation: (newSrcCitation.trim() && !isPlaceholderText(newSrcCitation)) ? newSrcCitation.trim() : undefined
     }]);
     setNewSrcTitle('');
     setNewSrcUrl('');
@@ -814,15 +848,37 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setSources(sources.filter((_, i) => i !== index));
   };
 
-  // Co-Author management helpers
+  // Co-Author management helpers with anti-placeholder validation
   const addCoAuthorItem = () => {
-    if (!newCoName.trim()) return;
+    if (!newCoName.trim()) {
+      setAlert({ text: 'Co-Author Name is required.', type: 'error' });
+      return;
+    }
+    if (isPlaceholderText(newCoName)) {
+      setAlert({ text: 'Co-Author Name contains sample/placeholder text. Please provide an authentic scholar name.', type: 'error' });
+      return;
+    }
+    if (newCoOrcid.trim()) {
+      const orcidRes = validateOrcid(newCoOrcid, 'Co-Author ORCID');
+      if (!orcidRes.isValid) {
+        setAlert({ text: orcidRes.error!, type: 'error' });
+        return;
+      }
+    }
+    if (newCoEmail.trim()) {
+      const emailRes = validateEmail(newCoEmail, 'Co-Author Email');
+      if (!emailRes.isValid) {
+        setAlert({ text: emailRes.error!, type: 'error' });
+        return;
+      }
+    }
+
     const newCo: CoAuthor = {
       name: newCoName.trim(),
-      role: newCoRole.trim() || undefined,
-      institution: newCoAffiliation.trim() || undefined,
-      orcid: newCoOrcid.trim() || undefined,
-      email: newCoEmail.trim() || undefined
+      role: (newCoRole.trim() && !isPlaceholderText(newCoRole)) ? newCoRole.trim() : undefined,
+      institution: (newCoAffiliation.trim() && !isPlaceholderText(newCoAffiliation)) ? newCoAffiliation.trim() : undefined,
+      orcid: (newCoOrcid.trim() && !isPlaceholderText(newCoOrcid)) ? newCoOrcid.trim() : undefined,
+      email: (newCoEmail.trim() && !isPlaceholderText(newCoEmail)) ? newCoEmail.trim().toLowerCase() : undefined
     };
     setCoAuthors([...coAuthors, newCo]);
     setNewCoName('');
@@ -883,12 +939,43 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     }
   };
 
-  // Publish / Save Draft Action
+  // Publish / Save Draft Action with Client-Side Form Validation
   const handleSavePost = async (forcedStatus?: 'draft' | 'published') => {
-    if (!title.trim() || !content.trim() || !slug.trim()) {
-      setAlert({ text: 'Please populate all mandatory fields: Title, Content, Slug.', type: 'error' });
+    // 1. Run rigorous validation to block placeholder/mock text and force authentic content
+    const validation = validateArticleForm({
+      title,
+      subtitle,
+      slug,
+      category,
+      excerpt,
+      content,
+      authorName,
+      authorOrcid,
+      doi,
+      featuredImage,
+      pdfLink,
+      canvaEmbed,
+      seriesName,
+      metaTitle,
+      metaDescription,
+      canonicalUrl,
+      coAuthors,
+      sources: sources.map(s => ({
+        citation: s.citation || s.title,
+        title: s.title,
+        url: s.url
+      }))
+    });
+
+    if (!validation.isValid) {
+      setArticleErrors(validation.errors);
+      const firstKey = Object.keys(validation.errors)[0];
+      setAlert({ text: `Validation Error: ${validation.errors[firstKey]}`, type: 'error' });
       return;
     }
+
+    setArticleErrors({});
+    const sanitized = validation.sanitized;
 
     const isAuthorOnly = effectiveRole === 'author';
     const currentStatus = isAuthorOnly ? 'draft' : (forcedStatus || status);
@@ -896,7 +983,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     const finalIsPinned = isAuthorOnly ? false : isPinned;
 
     // Smart calculated read-time estimation
-    const words = content.replace(/<[^>]+>/g, '').split(/\s+/).length;
+    const words = (sanitized.content || content).replace(/<[^>]+>/g, '').split(/\s+/).length;
     const computedReadTime = `${Math.max(3, Math.ceil(words / 200))} min read`;
 
     // Construct article JSON payload
@@ -921,24 +1008,24 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
     const articleData: Article = {
       id: finalId,
-      title: title.trim(),
-      subtitle: subtitle.trim() || undefined,
-      slug: slug.trim(),
-      category,
-      tags,
-      featuredImage: featuredImage.trim() || undefined,
-      canvaEmbed: canvaEmbed.trim() || undefined,
-      pdfLink: pdfLink.trim() || undefined,
-      authorId: authorId.trim() || currentUser?.authorId || 'scholar-contributor',
-      authorName: authorName.trim() || currentUser?.displayName || 'Scholar Contributor',
-      authorOrcid: authorOrcid.trim() || currentUser?.orcid || undefined,
+      title: sanitized.title || title.trim(),
+      subtitle: sanitized.subtitle,
+      slug: sanitized.slug || slug.trim(),
+      category: (sanitized.category as any) || category,
+      tags: tags.filter(t => t && !isPlaceholderText(t)),
+      featuredImage: sanitized.featuredImage,
+      canvaEmbed: sanitized.canvaEmbed,
+      pdfLink: sanitized.pdfLink,
+      authorId: authorId.trim() || currentUser?.authorId || 'priyasha-priyal-jena',
+      authorName: sanitized.authorName || authorName.trim() || currentUser?.displayName || 'Priyasha Priyal Jena',
+      authorOrcid: sanitized.authorOrcid,
       createdByUid: existingArt?.createdByUid || currentUser?.uid || auth.currentUser?.uid,
       createdByEmail: existingArt?.createdByEmail || currentUser?.email || auth.currentUser?.email || undefined,
-      doi: doi.trim() || undefined,
-      coAuthors: coAuthors.length > 0 ? coAuthors : undefined,
+      doi: sanitized.doi,
+      coAuthors: sanitized.coAuthors,
       readTime: computedReadTime,
-      excerpt: excerpt.trim() || title.trim(),
-      content: content,
+      excerpt: sanitized.excerpt || (sanitized.title || title.trim()),
+      content: sanitized.content || content,
       status: currentStatus,
       publishDate: currentStatus === 'published' ? (publishDate.trim() || existingArt?.publishDate || new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })) : undefined,
       createdAt: existingArt?.createdAt || Date.now(),
@@ -947,14 +1034,14 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
       isFeatured: finalIsFeatured,
       isPinned: finalIsPinned,
       sources,
-      seriesName: seriesName.trim() || undefined,
+      seriesName: sanitized.seriesName,
       seriesPart: typeof seriesPart === 'number' ? seriesPart : undefined,
       versions: updatedVersions,
-      metaTitle: metaTitle.trim() || undefined,
-      metaDescription: metaDescription.trim() || undefined,
-      seoTitle: metaTitle.trim() || title.trim(),
-      seoDescription: metaDescription.trim() || excerpt.trim() || undefined,
-      canonicalUrl: canonicalUrl.trim() || undefined
+      metaTitle: sanitized.metaTitle,
+      metaDescription: sanitized.metaDescription,
+      seoTitle: sanitized.metaTitle || sanitized.title || title.trim(),
+      seoDescription: sanitized.metaDescription || sanitized.excerpt || undefined,
+      canonicalUrl: sanitized.canonicalUrl
     };
 
     try {
@@ -973,18 +1060,18 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
       if (isAuthorOnly && forcedStatus === 'published') {
         const subCol = collection(db, 'submissions');
         await addDoc(subCol, {
-          title: title.trim(),
+          title: sanitized.title || title.trim(),
           category,
-          authorName: authorName.trim() || currentUser?.displayName || 'Scholar Contributor',
+          authorName: sanitized.authorName || authorName.trim() || currentUser?.displayName || 'Priyasha Priyal Jena',
           authorEmail: currentUser?.email || auth.currentUser?.email || '',
           affiliation: currentUser?.institution || '',
-          orcid: authorOrcid.trim() || currentUser?.orcid || '',
-          abstract: excerpt.trim() || title.trim(),
+          orcid: sanitized.authorOrcid || currentUser?.orcid || '',
+          abstract: sanitized.excerpt || sanitized.title || title.trim(),
           submittedAt: Date.now(),
           status: 'under_review',
           articleId: finalId
         });
-        setAlert({ text: `Manuscript "${title}" submitted to the Peer Review Queue for editorial evaluation.`, type: 'success' });
+        setAlert({ text: `Manuscript "${sanitized.title || title}" submitted to the Peer Review Queue for editorial evaluation.`, type: 'success' });
       } else {
         setAlert({ text: `Manuscript saved successfully as ${currentStatus.toUpperCase()}.`, type: 'success' });
       }
@@ -999,6 +1086,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   };
 
   const clearWriteForm = () => {
+    setArticleErrors({});
     setEditingId(null);
     setTitle('');
     setSubtitle('');
@@ -1451,15 +1539,27 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
               {/* Row 1: Title and Slug */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="flex flex-col gap-1.5">
-                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                    Article Title *
-                  </label>
+                  <div className="flex justify-between items-center">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                      Article Title *
+                    </label>
+                    {articleErrors.title && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {articleErrors.title}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     placeholder="Enter scholarly title..."
                     value={title}
-                    onChange={handleTitleChange}
-                    className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none focus:border-blood text-sm"
+                    onChange={(e) => {
+                      clearArticleError('title');
+                      handleTitleChange(e);
+                    }}
+                    className={`bg-navy border rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none text-sm ${
+                      articleErrors.title ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                    }`}
                   />
                 </div>
 
@@ -1481,7 +1581,10 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                   </div>
                   <select
                     value={category}
-                    onChange={(e: any) => setCategory(e.target.value)}
+                    onChange={(e: any) => {
+                      clearArticleError('category');
+                      setCategory(e.target.value);
+                    }}
                     className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none focus:border-blood text-sm"
                   >
                     <option value="criminology">Criminology</option>
@@ -1494,28 +1597,52 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
               {/* Row 2: Subtitle & Excerpt */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="flex flex-col gap-1.5">
-                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                    Subtitle or Chapter header
-                  </label>
+                  <div className="flex justify-between items-center">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                      Subtitle or Chapter header
+                    </label>
+                    {articleErrors.subtitle && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {articleErrors.subtitle}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
-                    placeholder="e.g. Part 1: Pathology of Control"
+                    placeholder="Subtitle or section heading..."
                     value={subtitle}
-                    onChange={(e) => setSubtitle(e.target.value)}
-                    className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none focus:border-blood text-sm"
+                    onChange={(e) => {
+                      clearArticleError('subtitle');
+                      setSubtitle(e.target.value);
+                    }}
+                    className={`bg-navy border rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none text-sm ${
+                      articleErrors.subtitle ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                    }`}
                   />
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                    Manual Slug Override *
-                  </label>
+                  <div className="flex justify-between items-center">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                      Manual Slug Override *
+                    </label>
+                    {articleErrors.slug && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {articleErrors.slug}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
-                    placeholder="e.g. psychology-of-serial-killers-1"
+                    placeholder="url-slug-identifier"
                     value={slug}
-                    onChange={(e) => setSlug(e.target.value)}
-                    className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-mono focus:outline-none focus:border-blood text-xs"
+                    onChange={(e) => {
+                      clearArticleError('slug');
+                      setSlug(e.target.value);
+                    }}
+                    className={`bg-navy border rounded-sm py-2.5 px-3 text-paper font-mono focus:outline-none text-xs ${
+                      articleErrors.slug ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                    }`}
                   />
                 </div>
               </div>
@@ -1523,15 +1650,27 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
               {/* Row 3: Series / Collections Support */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 <div className="flex flex-col gap-1.5">
-                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                    Series Name (Group name if applicable)
-                  </label>
+                  <div className="flex justify-between items-center">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                      Series Name (Group name if applicable)
+                    </label>
+                    {articleErrors.seriesName && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {articleErrors.seriesName}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
-                    placeholder="e.g. The Psychology of Serial Killers"
+                    placeholder="Series name..."
                     value={seriesName}
-                    onChange={(e) => setSeriesName(e.target.value)}
-                    className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none focus:border-blood text-sm"
+                    onChange={(e) => {
+                      clearArticleError('seriesName');
+                      setSeriesName(e.target.value);
+                    }}
+                    className={`bg-navy border rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none text-sm ${
+                      articleErrors.seriesName ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                    }`}
                   />
                 </div>
 
@@ -1541,7 +1680,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                   </label>
                   <input
                     type="number"
-                    placeholder="e.g. 1"
+                    placeholder="1"
                     value={seriesPart}
                     onChange={(e) => setSeriesPart(e.target.value ? parseInt(e.target.value) : '')}
                     className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none focus:border-blood text-sm"
@@ -1589,7 +1728,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                   </div>
                   <input
                     type="text"
-                    placeholder="e.g. 14 May 2024 or 2024-05-14"
+                    placeholder="DD Month YYYY or YYYY-MM-DD"
                     value={publishDate}
                     onChange={(e) => setPublishDate(e.target.value)}
                     className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none focus:border-blood text-sm"
@@ -1603,7 +1742,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. 8 min read"
+                    placeholder="8 min read"
                     value={readTime}
                     onChange={(e) => setReadTime(e.target.value)}
                     className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none focus:border-blood text-sm"
@@ -1664,42 +1803,79 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="flex flex-col gap-1.5">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                      Primary Author Name
-                    </label>
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                        Primary Author Name
+                      </label>
+                      {articleErrors.authorName && (
+                        <span className="font-sans text-[9px] font-bold text-red-400">
+                          {articleErrors.authorName}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
-                      placeholder="e.g. Priyasha Priyal Jena"
+                      placeholder="Primary author full name..."
                       value={authorName}
-                      onChange={(e) => setAuthorName(e.target.value)}
-                      className="bg-navy border border-paper/10 rounded-sm py-2 px-3 text-paper font-serif focus:outline-none focus:border-blood text-xs"
+                      onChange={(e) => {
+                        clearArticleError('authorName');
+                        setAuthorName(e.target.value);
+                      }}
+                      className={`bg-navy border rounded-sm py-2 px-3 text-paper font-serif focus:outline-none text-xs ${
+                        articleErrors.authorName ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                      }`}
                     />
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40 flex items-center justify-between">
-                      <span>Primary Author ORCID iD</span>
-                      <span className="font-mono text-[8px] text-paper/30">XXXX-XXXX-XXXX-XXXX</span>
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                        Primary Author ORCID iD
+                      </label>
+                      {articleErrors.authorOrcid ? (
+                        <span className="font-sans text-[9px] font-bold text-red-400">
+                          {articleErrors.authorOrcid}
+                        </span>
+                      ) : (
+                        <span className="font-mono text-[8px] text-paper/30">0000-0000-0000-0000</span>
+                      )}
+                    </div>
                     <input
                       type="text"
-                      placeholder="e.g. 0000-0002-1825-0097"
+                      placeholder="0000-0000-0000-0000"
                       value={authorOrcid}
-                      onChange={(e) => setAuthorOrcid(e.target.value)}
-                      className="bg-navy border border-paper/10 rounded-sm py-2 px-3 text-paper font-mono focus:outline-none focus:border-blood text-xs"
+                      onChange={(e) => {
+                        clearArticleError('authorOrcid');
+                        setAuthorOrcid(e.target.value);
+                      }}
+                      className={`bg-navy border rounded-sm py-2 px-3 text-paper font-mono focus:outline-none text-xs ${
+                        articleErrors.authorOrcid ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                      }`}
                     />
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                      Digital Object Identifier (DOI) / Archival Ref
-                    </label>
+                    <div className="flex justify-between items-center">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                        Digital Object Identifier (DOI)
+                      </label>
+                      {articleErrors.doi && (
+                        <span className="font-sans text-[9px] font-bold text-red-400">
+                          {articleErrors.doi}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
-                      placeholder="e.g. 10.5281/zenodo.10892341"
+                      placeholder="10.xxxx/xxxx..."
                       value={doi}
-                      onChange={(e) => setDoi(e.target.value)}
-                      className="bg-navy border border-paper/10 rounded-sm py-2 px-3 text-paper font-mono focus:outline-none focus:border-blood text-xs"
+                      onChange={(e) => {
+                        clearArticleError('doi');
+                        setDoi(e.target.value);
+                      }}
+                      className={`bg-navy border rounded-sm py-2 px-3 text-paper font-mono focus:outline-none text-xs ${
+                        articleErrors.doi ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                      }`}
                     />
                   </div>
                 </div>
@@ -1715,7 +1891,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                       <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">Co-Author Name *</label>
                       <input
                         type="text"
-                        placeholder="e.g. Dr. A. Sharma"
+                        placeholder="Co-author full name..."
                         value={newCoName}
                         onChange={(e) => setNewCoName(e.target.value)}
                         className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs"
@@ -1725,7 +1901,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                       <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">Scholarly Role</label>
                       <input
                         type="text"
-                        placeholder="e.g. Co-Author / Forensic Consultant"
+                        placeholder="Academic role / title..."
                         value={newCoRole}
                         onChange={(e) => setNewCoRole(e.target.value)}
                         className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs"
@@ -1735,7 +1911,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                       <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">Institution / University</label>
                       <input
                         type="text"
-                        placeholder="e.g. Oxford Criminology Dept"
+                        placeholder="Affiliated institution..."
                         value={newCoAffiliation}
                         onChange={(e) => setNewCoAffiliation(e.target.value)}
                         className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs"
@@ -1745,7 +1921,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                       <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">ORCID iD</label>
                       <input
                         type="text"
-                        placeholder="e.g. 0000-0001-2345-6789"
+                        placeholder="0000-0000-0000-0000"
                         value={newCoOrcid}
                         onChange={(e) => setNewCoOrcid(e.target.value)}
                         className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs font-mono"
@@ -1890,52 +2066,98 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                   <div className="relative mt-1">
                     <input
                       type="url"
-                      placeholder="Or paste high-res banner URL..."
+                      placeholder="Paste high-res banner URL..."
                       value={featuredImage}
-                      onChange={(e) => setFeaturedImage(e.target.value)}
-                      className="bg-navy border border-paper/10 rounded-sm py-2 px-3 text-paper font-mono focus:outline-none focus:border-blood text-[10px] w-full"
+                      onChange={(e) => {
+                        clearArticleError('featuredImage');
+                        setFeaturedImage(e.target.value);
+                      }}
+                      className={`bg-navy border rounded-sm py-2 px-3 text-paper font-mono focus:outline-none text-[10px] w-full ${
+                        articleErrors.featuredImage ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                      }`}
                     />
                   </div>
+                  {articleErrors.featuredImage && (
+                    <span className="font-sans text-[9px] font-bold text-red-400">
+                      {articleErrors.featuredImage}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                    PDF / Research Report Link
-                  </label>
+                  <div className="flex justify-between items-center">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                      PDF / Research Report Link
+                    </label>
+                    {articleErrors.pdfLink && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {articleErrors.pdfLink}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="url"
                     placeholder="https://drive.google.com/..."
                     value={pdfLink}
-                    onChange={(e) => setPdfLink(e.target.value)}
-                    className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-mono focus:outline-none focus:border-blood text-xs"
+                    onChange={(e) => {
+                      clearArticleError('pdfLink');
+                      setPdfLink(e.target.value);
+                    }}
+                    className={`bg-navy border rounded-sm py-2.5 px-3 text-paper font-mono focus:outline-none text-xs ${
+                      articleErrors.pdfLink ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                    }`}
                   />
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                    Canva Embed Link / HTML Source
-                  </label>
+                  <div className="flex justify-between items-center">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                      Canva Embed Link / HTML Source
+                    </label>
+                    {articleErrors.canvaEmbed && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {articleErrors.canvaEmbed}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
-                    placeholder="Paste Canva iframe or View URL..."
+                    placeholder="https://www.canva.com/design/..."
                     value={canvaEmbed}
-                    onChange={(e) => setCanvaEmbed(e.target.value)}
-                    className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-mono focus:outline-none focus:border-blood text-xs"
+                    onChange={(e) => {
+                      clearArticleError('canvaEmbed');
+                      setCanvaEmbed(e.target.value);
+                    }}
+                    className={`bg-navy border rounded-sm py-2.5 px-3 text-paper font-mono focus:outline-none text-xs ${
+                      articleErrors.canvaEmbed ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                    }`}
                   />
                 </div>
               </div>
 
               {/* Row 6: Article Excerpt (1-2 sentence preview summary) */}
               <div className="flex flex-col gap-1.5">
-                <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                  Article Excerpt * (Short synopsis seen in card lists)
-                </label>
+                <div className="flex justify-between items-center">
+                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                    Article Excerpt * (Short synopsis seen in card lists)
+                  </label>
+                  {articleErrors.excerpt && (
+                    <span className="font-sans text-[9px] font-bold text-red-400">
+                      {articleErrors.excerpt}
+                    </span>
+                  )}
+                </div>
                 <textarea
                   placeholder="Summarise this investigative essay in 1-2 powerful sentences..."
                   rows={2}
                   value={excerpt}
-                  onChange={(e) => setExcerpt(e.target.value)}
-                  className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3.5 text-paper font-serif focus:outline-none focus:border-blood text-sm resize-none"
+                  onChange={(e) => {
+                    clearArticleError('excerpt');
+                    setExcerpt(e.target.value);
+                  }}
+                  className={`bg-navy border rounded-sm py-2.5 px-3.5 text-paper font-serif focus:outline-none text-sm resize-none ${
+                    articleErrors.excerpt ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                  }`}
                 />
               </div>
 
@@ -1993,7 +2215,10 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                         {title.trim() && (
                           <button
                             type="button"
-                            onClick={() => setMetaTitle(title.trim())}
+                            onClick={() => {
+                              clearArticleError('metaTitle');
+                              setMetaTitle(title.trim());
+                            }}
                             className="font-sans text-[8px] uppercase tracking-wider text-blood hover:underline cursor-pointer flex items-center gap-1"
                           >
                             <Copy size={9} /> Copy Article Title
@@ -2010,11 +2235,21 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                     </div>
                     <input
                       type="text"
-                      placeholder={title ? `${title} | The Oligarchy` : "e.g. The Psychology of Power: A Critical Study | The Oligarchy"}
+                      placeholder={title ? `${title} | The Oligarchy` : "Study Title | The Oligarchy"}
                       value={metaTitle}
-                      onChange={(e) => setMetaTitle(e.target.value)}
-                      className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none focus:border-blood text-sm"
+                      onChange={(e) => {
+                        clearArticleError('metaTitle');
+                        setMetaTitle(e.target.value);
+                      }}
+                      className={`bg-navy border rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none text-sm ${
+                        articleErrors.metaTitle ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                      }`}
                     />
+                    {articleErrors.metaTitle && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {articleErrors.metaTitle}
+                      </span>
+                    )}
                     <span className="font-serif text-[10px] text-paper/30 italic">
                       Recommended 50–60 characters. Appears as the primary clickable title in search engine results and browser tab titles.
                     </span>
@@ -2031,7 +2266,10 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                         {excerpt.trim() && (
                           <button
                             type="button"
-                            onClick={() => setMetaDescription(excerpt.trim())}
+                            onClick={() => {
+                              clearArticleError('metaDescription');
+                              setMetaDescription(excerpt.trim());
+                            }}
                             className="font-sans text-[8px] uppercase tracking-wider text-blood hover:underline cursor-pointer flex items-center gap-1"
                           >
                             <Copy size={9} /> Copy Excerpt
@@ -2047,12 +2285,22 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                       </div>
                     </div>
                     <textarea
-                      placeholder={excerpt ? excerpt : "e.g. An empirical investigation into institutional hierarchy, persuasion mechanisms, and psychological dynamics of power systems..."}
+                      placeholder="An empirical investigation into institutional hierarchy, persuasion mechanisms, and psychological dynamics..."
                       rows={2}
                       value={metaDescription}
-                      onChange={(e) => setMetaDescription(e.target.value)}
-                      className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3.5 text-paper font-serif focus:outline-none focus:border-blood text-sm resize-none"
+                      onChange={(e) => {
+                        clearArticleError('metaDescription');
+                        setMetaDescription(e.target.value);
+                      }}
+                      className={`bg-navy border rounded-sm py-2.5 px-3.5 text-paper font-serif focus:outline-none text-sm resize-none ${
+                        articleErrors.metaDescription ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                      }`}
                     />
+                    {articleErrors.metaDescription && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {articleErrors.metaDescription}
+                      </span>
+                    )}
                     <span className="font-serif text-[10px] text-paper/30 italic">
                       Recommended 120–160 characters. Summarizes the investigation for search engines, web crawlers, and link unfurling cards.
                     </span>
@@ -2060,27 +2308,54 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
                   {/* Canonical URL / Cross-Posting Link (Optional) */}
                   <div className="flex flex-col gap-1.5 pt-2 border-t border-paper/5">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40 flex items-center justify-between">
-                      <span>Canonical URL (Optional Academic Cross-Posting Override)</span>
+                    <div className="flex items-center justify-between">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40 flex items-center justify-between">
+                        <span>Canonical URL (Optional Academic Cross-Posting Override)</span>
+                      </label>
                       <span className="font-mono text-[8px] text-paper/30">Defaults to theoligarchy.in/post/{slug || '...'}</span>
-                    </label>
+                    </div>
                     <input
                       type="url"
-                      placeholder="https://theoligarchy.in/post/... or external academic journal DOI/SSRN link"
+                      placeholder="https://theoligarchy.in/post/... or academic journal link"
                       value={canonicalUrl}
-                      onChange={(e) => setCanonicalUrl(e.target.value)}
-                      className="bg-navy border border-paper/10 rounded-sm py-2 px-3 text-paper font-mono focus:outline-none focus:border-blood text-xs"
+                      onChange={(e) => {
+                        clearArticleError('canonicalUrl');
+                        setCanonicalUrl(e.target.value);
+                      }}
+                      className={`bg-navy border rounded-sm py-2 px-3 text-paper font-mono focus:outline-none text-xs ${
+                        articleErrors.canonicalUrl ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                      }`}
                     />
+                    {articleErrors.canonicalUrl && (
+                      <span className="font-sans text-[9px] font-bold text-red-400">
+                        {articleErrors.canonicalUrl}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
 
               {/* Row 7: Modern Scholarly Quill Rich-Text Editor */}
               <div className="flex flex-col gap-1.5">
-                <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                  Full Scholarly Content * (Quill Rich-Text Engine)
-                </label>
-                <QuillEditor value={content} onChange={setContent} />
+                <div className="flex justify-between items-center">
+                  <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                    Full Scholarly Content * (Quill Rich-Text Engine)
+                  </label>
+                  {articleErrors.content && (
+                    <span className="font-sans text-[9px] font-bold text-red-400">
+                      {articleErrors.content}
+                    </span>
+                  )}
+                </div>
+                <div className={articleErrors.content ? 'ring-1 ring-red-500 rounded-sm' : ''}>
+                  <QuillEditor
+                    value={content}
+                    onChange={(newVal) => {
+                      clearArticleError('content');
+                      setContent(newVal);
+                    }}
+                  />
+                </div>
               </div>
 
               {/* Row 8: Version history if editing */}
@@ -2134,7 +2409,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                     <label className="font-sans text-[9px] uppercase tracking-wider text-paper/30">Source Title / Reference Cite</label>
                     <input
                       type="text"
-                      placeholder="e.g. Michels, R. (1911). Political Parties..."
+                      placeholder="Author, Year, Title, Journal / Publication..."
                       value={newSrcTitle}
                       onChange={(e) => setNewSrcTitle(e.target.value)}
                       className="bg-midnight border border-paper/10 rounded-sm py-2 px-3.5 text-paper text-xs"
@@ -2164,7 +2439,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                     <label className="font-sans text-[9px] uppercase tracking-wider text-paper/30">Optional Citation/Descriptor Label</label>
                     <input
                       type="text"
-                      placeholder="e.g. Journal of Sociology, Vol. 4"
+                      placeholder="Citation label or volume ref..."
                       value={newSrcCitation}
                       onChange={(e) => setNewSrcCitation(e.target.value)}
                       className="bg-midnight border border-paper/10 rounded-sm py-2 px-3 text-paper text-xs"
@@ -2260,139 +2535,323 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
           )}
 
           {/* ══ TAB 2: ALL ARTICLES / MY MANUSCRIPTS ══ */}
-          {activeTab === 'articles' && (
-            <div className="flex flex-col gap-5 fade-in">
-              {effectiveRole === 'author' && (
-                <div className="bg-navy/60 border border-paper/10 p-4 rounded-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-paper/70 font-serif">
-                  <div className="flex items-center gap-2">
-                    <BookOpen size={14} className="text-blood shrink-0" />
-                    <span>
-                      <strong>Author Corpus:</strong> Displaying your personal drafts and live published papers. Private drafts from other authors are isolated under RBAC.
-                    </span>
-                  </div>
-                  <button 
-                    onClick={() => { clearWriteForm(); setActiveTab('write'); }}
-                    className="font-sans text-[9px] font-bold uppercase tracking-wider bg-blood text-paper px-3.5 py-1.5 rounded-sm hover:bg-blood-light cursor-pointer shrink-0"
-                  >
-                    + Compose New Manuscript
-                  </button>
-                </div>
-              )}
+          {activeTab === 'articles' && (() => {
+            const scopedArticles = rbac.filterVisibleArticles(
+              allArticles, 
+              currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole }
+            );
 
-              <div className="overflow-x-auto border border-paper/10 rounded-sm">
-                <table className="w-full text-left border-collapse select-text">
-                  <thead>
-                    <tr className="border-b border-paper/10 bg-ink">
-                      <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Article</th>
-                      <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Category</th>
-                      <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Status</th>
-                      <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Views</th>
-                      <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-paper/5 font-serif text-sm text-paper/70">
-                    {rbac.filterVisibleArticles(allArticles, currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole }).length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="py-8 text-center text-paper/30 italic">No manuscripts found in your scope. Go to Write tab to begin drafting.</td>
-                      </tr>
-                    ) : (
-                      rbac.filterVisibleArticles(allArticles, currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole }).map((art) => (
-                        <tr key={art.id} className="hover:bg-paper/[0.01] transition-colors">
-                          <td className="py-4 px-4 font-bold text-paper/90 select-text">
-                            {art.isFeatured && <span className="text-blood mr-1" title="Pinned Featured">★</span>}
-                            {art.title}
-                            {art.subtitle && <span className="block text-xs font-normal text-paper/40 mt-0.5">{art.subtitle}</span>}
-                            {art.authorName && <span className="block font-sans text-[9px] text-paper/35 mt-0.5">By {art.authorName}</span>}
-                          </td>
-                          <td className="py-4 px-4 capitalize font-sans text-xs">{art.category}</td>
-                          <td className="py-4 px-4">
-                            {effectiveRole === 'admin' ? (
-                              <button
-                                onClick={() => handleTogglePublish(art)}
-                                className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-sm border cursor-pointer ${
+            const filteredArticles = scopedArticles.filter(art => {
+              // Category filter
+              if (articleCategoryFilter !== 'all' && art.category !== articleCategoryFilter) return false;
+              // Status filter
+              if (articleStatusFilter !== 'all' && art.status !== articleStatusFilter) return false;
+              // Search query
+              if (articleSearchQuery.trim()) {
+                const q = articleSearchQuery.toLowerCase();
+                const matchTitle = art.title?.toLowerCase().includes(q);
+                const matchSubtitle = art.subtitle?.toLowerCase().includes(q);
+                const matchAuthor = art.authorName?.toLowerCase().includes(q);
+                const matchCategory = art.category?.toLowerCase().includes(q);
+                const matchSlug = art.slug?.toLowerCase().includes(q);
+                const matchTags = (art.tags || []).some(t => t.toLowerCase().includes(q));
+                if (!matchTitle && !matchSubtitle && !matchAuthor && !matchCategory && !matchSlug && !matchTags) {
+                  return false;
+                }
+              }
+              return true;
+            });
+
+            return (
+              <div className="flex flex-col gap-5 fade-in select-text">
+                {/* Header Banner */}
+                <div className="bg-gradient-to-r from-ink via-navy to-ink border border-paper/10 p-5 rounded-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-sans text-[8px] font-bold tracking-[0.25em] text-blood uppercase bg-blood/10 border border-blood/30 px-2 py-0.5 rounded-xs flex items-center gap-1">
+                        <FileText size={10} />
+                        {effectiveRole === 'author' ? 'Author Portfolio Corpus' : 'Scholarly Publication Archive'}
+                      </span>
+                      <span className="font-mono text-[9px] text-paper/40">
+                        {scopedArticles.length} {scopedArticles.length === 1 ? 'Manuscript' : 'Manuscripts'} in Scope
+                      </span>
+                    </div>
+                    <h2 className="font-display text-xl font-bold text-paper">
+                      {effectiveRole === 'author' ? 'My Research Manuscripts & Drafts' : 'Treatises, Research Papers & Investigations'}
+                    </h2>
+                    <p className="font-serif text-xs text-paper/50 mt-0.5 max-w-2xl leading-relaxed">
+                      {effectiveRole === 'author'
+                        ? 'Manage personal research drafts, monitor editorial review feedback, and track readership engagement for your publications.'
+                        : 'Review, edit, publish, and manage all academic manuscripts, forensic treatises, and multi-part research series across The Oligarchy.'}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 shrink-0 self-start md:self-auto">
+                    <button
+                      onClick={refreshArticles}
+                      className="p-2.5 bg-paper/5 hover:bg-paper/10 border border-paper/10 rounded-sm text-paper/70 hover:text-paper cursor-pointer transition-colors"
+                      title="Reload article archive"
+                    >
+                      <RefreshCw size={13} />
+                    </button>
+                    <button 
+                      onClick={() => { clearWriteForm(); setActiveTab('write'); }}
+                      className="bg-blood hover:bg-blood/90 text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-2.5 px-4 rounded-sm flex items-center gap-2 cursor-pointer shadow-md transition-all border border-blood/50"
+                    >
+                      <Plus size={13} />
+                      Compose New Manuscript
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter & Search Bar */}
+                {scopedArticles.length > 0 && (
+                  <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-ink border border-paper/10 p-3 rounded-sm">
+                    <div className="relative w-full sm:w-80">
+                      <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-paper/40" />
+                      <input
+                        type="text"
+                        placeholder="Search by title, author, category, tag..."
+                        value={articleSearchQuery}
+                        onChange={(e) => setArticleSearchQuery(e.target.value)}
+                        className="w-full bg-midnight border border-paper/10 rounded-xs pl-9 pr-8 py-1.5 text-xs text-paper font-serif focus:outline-none focus:border-blood"
+                      />
+                      {articleSearchQuery && (
+                        <button
+                          onClick={() => setArticleSearchQuery('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-paper/30 hover:text-paper cursor-pointer"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 self-end sm:self-auto">
+                      {/* Category Pills */}
+                      <div className="inline-flex rounded-xs border border-paper/10 bg-midnight p-0.5">
+                        {(['all', 'criminology', 'psyche', 'politics'] as const).map((cat) => (
+                          <button
+                            key={cat}
+                            onClick={() => setArticleCategoryFilter(cat)}
+                            className={`font-sans text-[9px] uppercase tracking-wider px-2.5 py-1 rounded-xs transition-colors cursor-pointer capitalize ${
+                              articleCategoryFilter === cat ? 'bg-blood text-paper font-bold' : 'text-paper/50 hover:text-paper'
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Status Pills */}
+                      <div className="inline-flex rounded-xs border border-paper/10 bg-midnight p-0.5">
+                        <button
+                          onClick={() => setArticleStatusFilter('all')}
+                          className={`font-sans text-[9px] uppercase tracking-wider px-2 py-1 rounded-xs transition-colors cursor-pointer ${
+                            articleStatusFilter === 'all' ? 'bg-blood text-paper' : 'text-paper/50 hover:text-paper'
+                          }`}
+                        >
+                          All Status
+                        </button>
+                        <button
+                          onClick={() => setArticleStatusFilter('published')}
+                          className={`font-sans text-[9px] uppercase tracking-wider px-2 py-1 rounded-xs transition-colors cursor-pointer ${
+                            articleStatusFilter === 'published' ? 'bg-blood text-paper' : 'text-paper/50 hover:text-paper'
+                          }`}
+                        >
+                          Live
+                        </button>
+                        <button
+                          onClick={() => setArticleStatusFilter('draft')}
+                          className={`font-sans text-[9px] uppercase tracking-wider px-2 py-1 rounded-xs transition-colors cursor-pointer ${
+                            articleStatusFilter === 'draft' ? 'bg-blood text-paper' : 'text-paper/50 hover:text-paper'
+                          }`}
+                        >
+                          Draft
+                        </button>
+                      </div>
+
+                      {(articleSearchQuery || articleCategoryFilter !== 'all' || articleStatusFilter !== 'all') && (
+                        <button
+                          onClick={() => {
+                            setArticleSearchQuery('');
+                            setArticleCategoryFilter('all');
+                            setArticleStatusFilter('all');
+                          }}
+                          className="font-sans text-[9px] uppercase tracking-wider text-paper/40 hover:text-blood px-2 py-1 cursor-pointer transition-colors"
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Articles Table or Empty State */}
+                {allArticles.length === 0 ? (
+                  <EmptyState
+                    icon={FileText}
+                    badge="EMPTY CORPUS ARCHIVE"
+                    title="No Research Manuscripts in Database"
+                    description="The publication corpus contains zero treatises or investigative manuscripts. Begin drafting an analytical study to establish the publication archive."
+                    action={{
+                      label: 'Compose First Article',
+                      onClick: () => { clearWriteForm(); setActiveTab('write'); },
+                      icon: Plus
+                    }}
+                    hints={[
+                      'Use the Quill Rich-Text Editor for academic formatting and citation markers',
+                      'Assign custom categories (Criminology, Psyche, Politics) and DOI credentials',
+                      'Attach peer-reviewed bibliography sources and co-author attributions'
+                    ]}
+                  />
+                ) : scopedArticles.length === 0 ? (
+                  <EmptyState
+                    icon={BookOpen}
+                    badge="RBAC SCOPE ISOLATION"
+                    title="No Manuscripts in Your Assigned Scope"
+                    description={
+                      effectiveRole === 'author'
+                        ? "You have no personal manuscripts or active drafts registered under your scholar ID yet."
+                        : "No manuscripts are visible under your current editorial role credentials."
+                    }
+                    action={{
+                      label: 'Compose New Manuscript',
+                      onClick: () => { clearWriteForm(); setActiveTab('write'); },
+                      icon: Plus
+                    }}
+                  />
+                ) : filteredArticles.length === 0 ? (
+                  <EmptyState
+                    icon={Search}
+                    badge="ZERO MATCHES"
+                    title="No Manuscripts Match Filter Criteria"
+                    description={`No manuscripts match "${articleSearchQuery || articleCategoryFilter + ' / ' + articleStatusFilter}". Reset filters to view all ${scopedArticles.length} accessible manuscripts.`}
+                    action={{
+                      label: 'Reset Filters & Search',
+                      onClick: () => {
+                        setArticleSearchQuery('');
+                        setArticleCategoryFilter('all');
+                        setArticleStatusFilter('all');
+                      },
+                      icon: RefreshCw
+                    }}
+                    secondaryAction={{
+                      label: 'Compose New Manuscript',
+                      onClick: () => { clearWriteForm(); setActiveTab('write'); },
+                      icon: Plus
+                    }}
+                  />
+                ) : (
+                  <div className="overflow-x-auto border border-paper/10 rounded-sm">
+                    <table className="w-full text-left border-collapse select-text">
+                      <thead>
+                        <tr className="border-b border-paper/10 bg-ink">
+                          <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Article</th>
+                          <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Category</th>
+                          <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Status</th>
+                          <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Views</th>
+                          <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-paper/5 font-serif text-sm text-paper/70">
+                        {filteredArticles.map((art) => (
+                          <tr key={art.id} className="hover:bg-paper/[0.01] transition-colors">
+                            <td className="py-4 px-4 font-bold text-paper/90 select-text">
+                              {art.isFeatured && <span className="text-blood mr-1" title="Pinned Featured">★</span>}
+                              {art.title}
+                              {art.subtitle && <span className="block text-xs font-normal text-paper/40 mt-0.5">{art.subtitle}</span>}
+                              {art.authorName && <span className="block font-sans text-[9px] text-paper/35 mt-0.5">By {art.authorName}</span>}
+                            </td>
+                            <td className="py-4 px-4 capitalize font-sans text-xs">{art.category}</td>
+                            <td className="py-4 px-4">
+                              {effectiveRole === 'admin' ? (
+                                <button
+                                  onClick={() => handleTogglePublish(art)}
+                                  className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-sm border cursor-pointer transition-colors ${
+                                    art.status === 'published' 
+                                      ? 'bg-green-950/10 text-[#8bc4a8] border-green-800/30 hover:border-green-500/50' 
+                                      : 'bg-yellow-950/10 text-yellow-500 border-yellow-800/30 hover:border-yellow-500/50'
+                                  }`}
+                                  title="Click to toggle draft/published"
+                                >
+                                  {art.status === 'published' ? 'Live' : 'Draft'}
+                                </button>
+                              ) : (
+                                <span className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-sm border ${
                                   art.status === 'published' 
                                     ? 'bg-green-950/10 text-[#8bc4a8] border-green-800/30' 
                                     : 'bg-yellow-950/10 text-yellow-500 border-yellow-800/30'
-                                }`}
-                                title="Click to toggle draft/published"
-                              >
-                                {art.status === 'published' ? 'Live' : 'Draft'}
-                              </button>
-                            ) : (
-                              <span className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-sm border ${
-                                art.status === 'published' 
-                                  ? 'bg-green-950/10 text-[#8bc4a8] border-green-800/30' 
-                                  : 'bg-yellow-950/10 text-yellow-500 border-yellow-800/30'
-                              }`}>
-                                {art.status === 'published' ? 'Live' : 'Draft'}
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-4 px-4 font-mono text-xs text-paper/40">{art.views || 0}</td>
-                          <td className="py-4 px-4">
-                            <div className="flex gap-2">
-                              <button 
-                                onClick={() => setNotesArticleModal(art)}
-                                className="p-1.5 border border-paper/10 text-paper/50 hover:text-amber-300 hover:border-amber-400/40 transition-colors rounded-sm cursor-pointer"
-                                title="Draft Feedback, Fact-Checking & Legal Clearance Notes"
-                              >
-                                <MessageSquare size={13} />
-                              </button>
-                              {rbac.canEditArticle(art, currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole }) && (
-                                <button 
-                                  onClick={() => handleEditArticle(art)}
-                                  className="p-1.5 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood transition-colors rounded-sm cursor-pointer"
-                                  title="Edit Manuscript"
-                                >
-                                  <FileEdit size={13} />
-                                </button>
+                                }`}>
+                                  {art.status === 'published' ? 'Live' : 'Draft'}
+                                </span>
                               )}
-                              {effectiveRole === 'admin' && (
+                            </td>
+                            <td className="py-4 px-4 font-mono text-xs text-paper/40">{art.views || 0}</td>
+                            <td className="py-4 px-4 text-right">
+                              <div className="flex items-center justify-end gap-2">
                                 <button 
-                                  onClick={() => handleDuplicateArticle(art)}
-                                  className="p-1.5 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood transition-colors rounded-sm cursor-pointer"
-                                  title="Duplicate Article"
+                                  onClick={() => setNotesArticleModal(art)}
+                                  className="p-1.5 border border-paper/10 text-paper/50 hover:text-amber-300 hover:border-amber-400/40 transition-colors rounded-sm cursor-pointer"
+                                  title="Draft Feedback, Fact-Checking & Legal Clearance Notes"
                                 >
-                                  <Copy size={13} />
+                                  <MessageSquare size={13} />
                                 </button>
-                              )}
-                              {rbac.canDeleteArticle(art, currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole }) && (
-                                deleteConfirmArticleId === art.id ? (
-                                  <div className="flex items-center gap-1 bg-red-950/40 border border-red-900/50 p-1 px-1.5 rounded-sm text-[9px] font-sans">
-                                    <span className="text-red-400 font-bold uppercase tracking-wider text-[7px] mr-1">Delete?</span>
-                                    <button
-                                      onClick={() => handleDeleteArticle(art.id)}
-                                      className="bg-red-800 hover:bg-red-700 text-white font-bold px-1.5 py-0.5 rounded-sm cursor-pointer text-[7px] uppercase"
-                                    >
-                                      Yes
-                                    </button>
-                                    <button
-                                      onClick={() => setDeleteConfirmArticleId(null)}
-                                      className="bg-paper/10 hover:bg-paper/20 text-paper/70 font-bold px-1.5 py-0.5 rounded-sm cursor-pointer text-[7px] uppercase"
-                                    >
-                                      No
-                                    </button>
-                                  </div>
-                                ) : (
+                                {rbac.canEditArticle(art, currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole }) && (
                                   <button 
-                                    onClick={() => setDeleteConfirmArticleId(art.id)}
-                                    className="p-1.5 border border-paper/10 text-paper/30 hover:text-red-400 hover:border-red-400/40 transition-colors rounded-sm cursor-pointer"
-                                    title="Delete Post"
+                                    onClick={() => handleEditArticle(art)}
+                                    className="p-1.5 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood transition-colors rounded-sm cursor-pointer"
+                                    title="Edit Manuscript"
                                   >
-                                    <Trash2 size={13} />
+                                    <FileEdit size={13} />
                                   </button>
-                                )
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                                )}
+                                {effectiveRole === 'admin' && (
+                                  <button 
+                                    onClick={() => handleDuplicateArticle(art)}
+                                    className="p-1.5 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood transition-colors rounded-sm cursor-pointer"
+                                    title="Duplicate Article"
+                                  >
+                                    <Copy size={13} />
+                                  </button>
+                                )}
+                                {rbac.canDeleteArticle(art, currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole }) && (
+                                  deleteConfirmArticleId === art.id ? (
+                                    <div className="flex items-center gap-1 bg-red-950/40 border border-red-900/50 p-1 px-1.5 rounded-sm text-[9px] font-sans">
+                                      <span className="text-red-400 font-bold uppercase tracking-wider text-[7px] mr-1">Delete?</span>
+                                      <button
+                                        onClick={() => handleDeleteArticle(art.id)}
+                                        className="bg-red-800 hover:bg-red-700 text-white font-bold px-1.5 py-0.5 rounded-sm cursor-pointer text-[7px] uppercase"
+                                      >
+                                        Yes
+                                      </button>
+                                      <button
+                                        onClick={() => setDeleteConfirmArticleId(null)}
+                                        className="bg-paper/10 hover:bg-paper/20 text-paper/70 font-bold px-1.5 py-0.5 rounded-sm cursor-pointer text-[7px] uppercase"
+                                      >
+                                        No
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button 
+                                      onClick={() => setDeleteConfirmArticleId(art.id)}
+                                      className="p-1.5 border border-paper/10 text-paper/30 hover:text-red-400 hover:border-red-400/40 transition-colors rounded-sm cursor-pointer"
+                                      title="Delete Post"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  )
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ══ TAB: PEER REVIEW QUEUE & MANUSCRIPT TRIAGE PIPELINE ══ */}
           {activeTab === 'pitches' && (
@@ -2443,9 +2902,12 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
               <div className="flex flex-col gap-4">
                 {tips.length === 0 ? (
-                  <div className="border border-dashed border-paper/10 p-10 text-center text-paper/30 italic rounded-sm">
-                    Inbox empty. No classified research reports received yet.
-                  </div>
+                  <EmptyState
+                    icon={Inbox}
+                    badge="CLASSIFIED INBOX CLEAR"
+                    title="No Reader Submissions or Whistleblower Tips"
+                    description="The encrypted whistleblower envelope has received zero submissions. Readers and academic researchers can submit confidential disclosures through the public tip inbox."
+                  />
                 ) : (
                   tips.map((tip) => (
                     <div 
@@ -2506,7 +2968,13 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                   
                   <div className="flex flex-col gap-3">
                     {readingStack.length === 0 ? (
-                      <p className="font-serif italic text-sm text-paper/30 py-4">No volumes currently added to the stack.</p>
+                      <EmptyState
+                        icon={BookOpen}
+                        badge="EMPTY LITERATURE SHELF"
+                        title="No Reference Volumes in Stack"
+                        description="Log seminal literature, psychological treatises, or investigative texts currently informing the editorial corpus using the form to the right."
+                        variant="card"
+                      />
                     ) : (
                       readingStack.map((book) => (
                         <div key={book.id} className="bg-navy border border-paper/10 p-4 rounded-sm flex justify-between items-center gap-4">
@@ -2662,7 +3130,13 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
                   <div className="bg-navy border border-paper/10 rounded-sm p-4 flex flex-col gap-3">
                     {subscribers.length === 0 ? (
-                      <p className="font-serif italic text-xs text-paper/30 py-4 text-center">No active subscribers currently registered.</p>
+                      <EmptyState
+                        icon={Mail}
+                        badge="SUBSCRIBER REGISTRY CLEAR"
+                        title="No Active Subscribers"
+                        description="Readers who join the dispatch newsletter via the public footer or archive modal will appear in this registry."
+                        variant="card"
+                      />
                     ) : (
                       <div className="flex flex-col gap-2 max-h-[450px] overflow-y-auto pr-2 divide-y divide-paper/5">
                         {subscribers.map((sub, index) => (

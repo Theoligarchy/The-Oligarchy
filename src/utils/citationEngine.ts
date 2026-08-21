@@ -115,7 +115,7 @@ export function getArticleArchivalId(article: Article): string {
 }
 
 /**
- * Normalizes ORCID string into clean 16-digit format with hyphens (e.g. 0000-0002-1825-0097)
+ * Normalizes ORCID string into clean 16-digit format with hyphens (e.g. 0000-0000-0000-0000)
  */
 export function normalizeOrcid(orcid?: string): string | null {
   if (!orcid || typeof orcid !== 'string') return null;

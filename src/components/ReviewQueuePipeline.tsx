@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, getDocs, doc, updateDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { ManuscriptSubmission, EditorialRole } from '../types';
+import { EmptyState } from './EmptyState';
 import { 
   FileText, 
   Search, 
@@ -572,15 +573,40 @@ The Oligarchy`;
           <p>Loading manuscript review queue...</p>
         </div>
       ) : filteredSubmissions.length === 0 ? (
-        <div className="py-16 text-center bg-ink/40 border border-paper/10 rounded-sm p-8 space-y-3">
-          <Inbox size={32} className="mx-auto text-paper/20" />
-          <h3 className="font-display text-lg text-paper/80 font-bold">No Submissions Found</h3>
-          <p className="font-serif text-xs text-paper/40 max-w-md mx-auto">
-            {submissions.length === 0 
-              ? "The review queue is currently empty. New submissions received through the public 'Submit an Investigation' tab will appear here in real time."
-              : "No manuscript pitches match the selected filters or search parameters."}
-          </p>
-        </div>
+        submissions.length === 0 ? (
+          <EmptyState
+            icon={Inbox}
+            badge="REVIEW QUEUE INBOX CLEAR"
+            title="No Manuscript Submissions Pending"
+            description="The editorial intake queue is currently clear. New manuscript proposals and forensic investigative pitches submitted through the public intake portal will appear here in real time."
+            action={{
+              label: 'Refresh Review Queue',
+              onClick: loadSubmissions,
+              icon: RefreshCw
+            }}
+            hints={[
+              'Public submissions are submitted via the "Submit an Investigation" portal',
+              'Submissions can be triaged across Peer Review, Revision, and Accepted stages',
+              'Accepted manuscripts can be converted directly into the publication corpus with 1-click'
+            ]}
+          />
+        ) : (
+          <EmptyState
+            icon={Search}
+            badge="ZERO QUEUE MATCHES"
+            title="No Submissions Match Filter"
+            description={`No manuscript pitches match "${searchQuery || activeStage + ' / ' + categoryFilter}". Reset filters to review all ${submissions.length} queued manuscripts.`}
+            action={{
+              label: 'Reset Filters',
+              onClick: () => {
+                setActiveStage('all');
+                setCategoryFilter('all');
+                setSearchQuery('');
+              },
+              icon: RefreshCw
+            }}
+          />
+        )
       ) : (
         <div className="space-y-3">
           {filteredSubmissions.map((sub) => {

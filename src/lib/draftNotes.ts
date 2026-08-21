@@ -25,69 +25,8 @@ import {
 const DRAFT_NOTES_COLLECTION = 'draft_notes';
 const LOCAL_STORAGE_DRAFT_NOTES_KEY = 'tol_draft_notes_cache';
 
-// Seed sample notes for demo drafts if collection is empty
-const INITIAL_DEMO_NOTES: DraftInternalNote[] = [
-  {
-    id: 'note-fc-01',
-    articleId: 'case-study-psychopathy-in-the-c-suite',
-    articleTitle: 'The Architecture of Impunity: Psychopathy in the C-Suite',
-    category: 'fact_checking',
-    urgency: 'critical',
-    status: 'open',
-    authorName: 'Dr. Evelyn Reed',
-    authorEmail: 'editor@theoligarchy.in',
-    authorRole: 'reviewer',
-    referencedSnippet: 'Corporate embezzlement rate increased by 47% between 2021 and 2024 according to SEC filings.',
-    sectionName: 'Section II: Quantitative Discrepancies',
-    content: 'Please verify the 47% figure against the revised 2024 SEC Enforcement Division Annual Report. Earlier press releases cited 38.4% before restatement.',
-    timestamp: Date.now() - 3600000 * 18,
-    replies: [
-      {
-        id: 'rep-01',
-        authorName: 'Priyasha Priyal Jena',
-        authorEmail: 'theoligarchy.ppj@gmail.com',
-        authorRole: 'admin',
-        content: 'Cross-checked against the September 2024 revised appendix (Table 4B, p. 112). I will add the direct link to the SEC docket in the citations array.',
-        timestamp: Date.now() - 3600000 * 12
-      }
-    ]
-  },
-  {
-    id: 'note-legal-02',
-    articleId: 'state-surveillance-apparatus-analysis',
-    articleTitle: 'Surveillance Oligarchy: Metadata Interception in Democratic States',
-    category: 'legal_review',
-    urgency: 'critical',
-    status: 'open',
-    authorName: 'Marcus Vance, LL.M',
-    authorEmail: 'legal@theoligarchy.in',
-    authorRole: 'reviewer',
-    referencedSnippet: 'The defense contractor in question deliberately bypassed Section 702 minimization standards.',
-    sectionName: 'Paragraph 14: Defense Procurement Protocols',
-    content: 'Legal clearance requirement: Ensure phrasing characterizes this as an "allegation documented in congressional testimony" rather than an established judicial finding to avoid defamation liability under jurisdiction laws.',
-    timestamp: Date.now() - 3600000 * 24,
-    replies: []
-  },
-  {
-    id: 'note-cit-03',
-    articleId: 'case-study-psychopathy-in-the-c-suite',
-    articleTitle: 'The Architecture of Impunity: Psychopathy in the C-Suite',
-    category: 'citation_validation',
-    urgency: 'moderate',
-    status: 'resolved',
-    authorName: 'Alistair Sterling',
-    authorEmail: 'alistair@theoligarchy.in',
-    authorRole: 'reviewer',
-    referencedSnippet: 'Hare, R. D. (2003). The Psychopathy Checklist-Revised (2nd ed.).',
-    sectionName: 'Methodology: Diagnostic Taxonomy',
-    content: 'Citation validated. Added DOI resolver link (10.1037/t03808-000) and verified psychometric cutoff thresholds.',
-    timestamp: Date.now() - 3600000 * 48,
-    resolvedAt: Date.now() - 3600000 * 6,
-    resolvedBy: 'Priyasha Priyal Jena',
-    resolutionNote: 'DOI appended directly to sources block. Validated against Multi-Health Systems psychometric standards.',
-    replies: []
-  }
-];
+// No fabricated internal notes by default
+const INITIAL_DEMO_NOTES: DraftInternalNote[] = [];
 
 // Helper to get local cached notes
 function getLocalDraftNotes(): DraftInternalNote[] {
