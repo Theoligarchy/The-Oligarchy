@@ -2065,9 +2065,9 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                   {/* Manual URL Input Overlay */}
                   <div className="relative mt-1">
                     <input
-                      type="url"
-                      placeholder="Paste high-res banner URL..."
-                      value={featuredImage}
+                      type="text"
+                      placeholder="Or paste high-res image URL (https://...)..."
+                      value={featuredImage.startsWith('data:image/') ? '' : featuredImage}
                       onChange={(e) => {
                         clearArticleError('featuredImage');
                         setFeaturedImage(e.target.value);
@@ -2076,6 +2076,11 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                         articleErrors.featuredImage ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
                       }`}
                     />
+                    {featuredImage.startsWith('data:image/') && (
+                      <span className="absolute right-2 top-2 font-mono text-[9px] text-[#8bc4a8] bg-[#8bc4a8]/10 px-1.5 py-0.5 rounded border border-[#8bc4a8]/30 pointer-events-none">
+                        Attached Uploaded File
+                      </span>
+                    )}
                   </div>
                   {articleErrors.featuredImage && (
                     <span className="font-sans text-[9px] font-bold text-red-400">

@@ -19,6 +19,7 @@ const ORCID_REGEX = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/i;
 const DOI_REGEX = /^(?:doi:\s*|https?:\/\/(?:dx\.)?doi\.org\/)?(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)$/i;
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const URL_REGEX = /^https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_+.~#?&//=]*)$/i;
+const DATA_IMAGE_REGEX = /^data:image\/(?:jpeg|jpg|png|webp|gif|svg\+xml|avif);base64,[A-Za-z0-9+/=]+$/i;
 
 // Banned generic placeholder substrings (case-insensitive)
 const BANNED_PLACEHOLDER_SNIPPETS = [
@@ -247,6 +248,37 @@ export function validateUrl(val?: string, fieldName = 'URL', requireHttp = true)
 }
 
 /**
+ * Validates Image URL (Supports Web URLs, Base64 Data URIs, and local relative paths)
+ */
+export function validateImageUrl(val?: string, fieldName = 'Featured Image URL'): { isValid: boolean; error?: string; cleanVal?: string } {
+  if (!val || !val.trim()) {
+    return { isValid: true, cleanVal: undefined };
+  }
+  const clean = val.trim();
+
+  // 1. Check for placeholder text
+  if (isPlaceholderText(clean)) {
+    return { isValid: false, error: `${fieldName} contains placeholder text. Please provide an authentic image or leave empty.` };
+  }
+
+  // 2. Allow base64 Data URIs (from drag-and-drop or local file compression)
+  if (clean.startsWith('data:image/')) {
+    if (DATA_IMAGE_REGEX.test(clean) || clean.startsWith('data:image/')) {
+      return { isValid: true, cleanVal: clean };
+    }
+    return { isValid: false, error: `${fieldName} has an invalid Base64 image encoding.` };
+  }
+
+  // 3. Allow relative asset paths (e.g., /banners/..., /assets/...)
+  if (clean.startsWith('/') || clean.startsWith('./')) {
+    return { isValid: true, cleanVal: clean };
+  }
+
+  // 4. Validate as web URL (https://...)
+  return validateUrl(clean, fieldName, true);
+}
+
+/**
  * Validates Article Slug
  */
 export function validateSlug(val: string, fieldName = 'URL Slug'): { isValid: boolean; error?: string; cleanVal?: string } {
@@ -395,7 +427,7 @@ export function validateArticleForm(input: ArticleFormInput): ValidationResult<P
   else sanitized.doi = doiVal.cleanVal;
 
   // 9. URLs
-  const imgVal = validateUrl(input.featuredImage, 'Featured Image URL');
+  const imgVal = validateImageUrl(input.featuredImage, 'Featured Image');
   if (!imgVal.isValid) errors.featuredImage = imgVal.error!;
   else sanitized.featuredImage = imgVal.cleanVal;
 
@@ -578,7 +610,7 @@ export function validateContributorForm(input: ContributorFormInput): Validation
 
   // 9. Profile Image URL (Optional)
   const imgInput = input.profileImage || input.avatarUrl;
-  const imgVal = validateUrl(imgInput, 'Profile Image URL');
+  const imgVal = validateImageUrl(imgInput, 'Profile Image');
   if (!imgVal.isValid) errors.profileImage = imgVal.error!;
   else {
     sanitized.profileImage = imgVal.cleanVal;
