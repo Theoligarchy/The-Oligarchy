@@ -174,6 +174,338 @@
   }
 }
 
+/* ==========================================================================
+   ARTICLE PROSE & SCHOLARLY TYPOGRAPHY STYLES
+   Ensures tight, continuous, readable paragraph rhythm across all screen sizes
+   with semantically proportional spacing for headings, blockquotes, and lists.
+   ========================================================================== */
+.article-content {
+  font-family: var(--font-serif);
+  color: rgba(224, 224, 224, 0.88);
+  font-size: 1.05rem;
+  line-height: 1.8;
+  word-break: break-word;
+}
+
+@media screen and (min-width: 768px) {
+  .article-content {
+    font-size: 1.125rem;
+    line-height: 1.85;
+  }
+}
+
+/* Paragraphs — tight, readable editorial spacing (approx 0.8rem - 1.1rem) */
+.article-content p {
+  font-family: var(--font-serif);
+  margin-top: 0;
+  margin-bottom: 0.9rem;
+  line-height: 1.8;
+  color: rgba(224, 224, 224, 0.88);
+}
+
+@media screen and (min-width: 768px) {
+  .article-content p {
+    margin-bottom: 1.1rem;
+    line-height: 1.85;
+  }
+}
+
+/* Eliminate accidental empty lines or solitary <br> from rich-text outputs */
+.article-content p:empty,
+.article-content p > br:only-child {
+  display: none;
+}
+
+/* Headings within article body — generous, distinct section rhythm */
+.article-content h1,
+.article-content h2,
+.article-content h3,
+.article-content h4,
+.article-content h5,
+.article-content h6 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: #f0f0f0;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+}
+
+.article-content h1 {
+  font-size: 1.5rem;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(224, 224, 224, 0.12);
+  padding-bottom: 0.4rem;
+}
+
+.article-content h2 {
+  font-size: 1.35rem;
+  margin-top: 1.75rem;
+  margin-bottom: 0.6rem;
+  color: #ffffff;
+}
+
+.article-content h3 {
+  font-size: 1.18rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  font-style: italic;
+}
+
+.article-content h4 {
+  font-size: 1.05rem;
+  margin-top: 1.25rem;
+  margin-bottom: 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(224, 224, 224, 0.75);
+}
+
+@media screen and (min-width: 768px) {
+  .article-content h1 {
+    font-size: 1.85rem;
+    margin-top: 2.5rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .article-content h2 {
+    font-size: 1.6rem;
+    margin-top: 2.25rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .article-content h3 {
+    font-size: 1.35rem;
+    margin-top: 1.85rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .article-content h4 {
+    font-size: 1.15rem;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+}
+
+/* Headings immediately following headings */
+.article-content h1 + h2,
+.article-content h2 + h3,
+.article-content h3 + h4 {
+  margin-top: 0.5rem;
+}
+
+/* Blockquotes — signature red border & comfortable padding */
+.article-content blockquote,
+.article-content .blockquote {
+  margin: 1.35rem 0;
+  padding: 0.85rem 1.15rem 0.85rem 1.25rem;
+  border-left: 3px solid #721c24;
+  background-color: rgba(17, 17, 17, 0.6);
+  border-radius: 0 2px 2px 0;
+  font-style: italic;
+  color: #f0f0f0;
+}
+
+@media screen and (min-width: 768px) {
+  .article-content blockquote,
+  .article-content .blockquote {
+    margin: 1.75rem 0;
+    padding: 1rem 1.5rem 1rem 1.5rem;
+  }
+}
+
+.article-content blockquote p,
+.article-content .blockquote p {
+  margin-bottom: 0.5rem;
+  color: #f0f0f0;
+}
+
+.article-content blockquote p:last-child,
+.article-content .blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* Lists — academic bullet / numbered lists */
+.article-content ul {
+  list-style-type: disc;
+  margin: 0.85rem 0 1.1rem 0;
+  padding-left: 1.4rem;
+}
+
+.article-content ol {
+  list-style-type: decimal;
+  margin: 0.85rem 0 1.1rem 0;
+  padding-left: 1.4rem;
+}
+
+.article-content li {
+  margin-bottom: 0.35rem;
+  line-height: 1.75;
+  color: rgba(224, 224, 224, 0.85);
+}
+
+.article-content li::marker {
+  color: #721c24;
+}
+
+.article-content li > p {
+  margin-bottom: 0.25rem;
+}
+
+/* Inline typography */
+.article-content strong,
+.article-content b {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.article-content em,
+.article-content i {
+  font-style: italic;
+}
+
+.article-content a {
+  color: #922c35;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 0.2s;
+}
+
+.article-content a:hover {
+  color: #e0e0e0;
+}
+
+.article-content code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background-color: #111111;
+  border: 1px solid rgba(224, 224, 224, 0.1);
+  padding: 0.15em 0.35em;
+  border-radius: 2px;
+  color: #e0e0e0;
+}
+
+.article-content pre {
+  background-color: #0d0d0d;
+  border: 1px solid rgba(224, 224, 224, 0.12);
+  padding: 1rem;
+  border-radius: 2px;
+  overflow-x: auto;
+  margin: 1.25rem 0;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  line-height: 1.6;
+}
+
+.article-content pre code {
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+
+.article-content hr {
+  margin: 2.25rem auto;
+  border: 0;
+  border-top: 1px solid rgba(224, 224, 224, 0.15);
+  width: 70%;
+}
+
+.article-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 2px;
+  border: 1px solid rgba(224, 224, 224, 0.1);
+  margin: 1.5rem auto;
+  display: block;
+}
+
+.article-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.95em;
+}
+
+.article-content th,
+.article-content td {
+  padding: 0.6rem 0.85rem;
+  border: 1px solid rgba(224, 224, 224, 0.1);
+}
+
+.article-content th {
+  background-color: #111111;
+  font-family: var(--font-display);
+  font-weight: 700;
+  text-align: left;
+}
+
+/* ==========================================================================
+   INTERACTIVE FOOTNOTE CITATION BUTTONS & TOOLTIPS
+   ========================================================================== */
+.footnote-ref-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  vertical-align: super;
+  font-size: 0.76em;
+  line-height: 1;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  margin: 0 0.2em;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  background-color: rgba(114, 28, 36, 0.18);
+  color: #e27d86;
+  border: 1px solid rgba(114, 28, 36, 0.45);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.footnote-ref-btn sup {
+  vertical-align: baseline;
+  line-height: inherit;
+  font-size: inherit;
+}
+
+.footnote-ref-btn:hover {
+  background-color: rgba(114, 28, 36, 0.45);
+  color: #ffffff;
+  border-color: rgba(224, 224, 224, 0.6);
+  transform: translateY(-1px) scale(1.06);
+  box-shadow: 0 0 8px rgba(114, 28, 36, 0.5);
+}
+
+.footnote-ref-btn:active,
+.footnote-ref-btn:focus-visible {
+  outline: 2px solid #721c24;
+  outline-offset: 1px;
+  background-color: #721c24;
+  color: #ffffff;
+}
+
+/* Highlight flash animation when jumped to from a footnote popover */
+@keyframes referenceGlowPulse {
+  0% {
+    background-color: rgba(114, 28, 36, 0.5);
+    border-left-color: #721c24;
+    box-shadow: 0 0 16px rgba(114, 28, 36, 0.6);
+  }
+  50% {
+    background-color: rgba(114, 28, 36, 0.25);
+  }
+  100% {
+    background-color: rgba(224, 224, 224, 0.015);
+    border-left-color: rgba(224, 224, 224, 0.15);
+    box-shadow: none;
+  }
+}
+
+.reference-highlight-pulse {
+  animation: referenceGlowPulse 2.8s ease-out forwards;
+}
+
 /* ==========================================
    ACADEMIC PRINT & OFFCUT STYLING (Ctrl+P)
    ========================================== */

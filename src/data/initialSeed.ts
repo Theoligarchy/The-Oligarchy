@@ -18,7 +18,7 @@ export const INITIAL_SEED_ARTICLES: Article[] = [
       <p>The phenomenon of the serial killer occupies a unique position in both criminological theory and the public imagination. Far from the sensationalised caricatures presented in tabloid media, the reality of the serial offender lies in a complex matrix of developmental trauma, neurobiological predisposition, and severe psychological pathology. This research paper examines the cognitive mechanisms, fantasy structures, and pathological behaviors that define these rare but highly destructive offenders.</p>
       
       <h2>The Role of Omnipotent Fantasy</h2>
-      <p>At the core of the serial offender's pathology is a highly structured, persistent fantasy world. Criminological studies suggest that for the individual who eventually commits multiple homicide, fantasy functions as a crucial coping mechanism during formative, traumatic years. When faced with absolute powerlessness in their domestic environments, the individual retreats into internal scenarios of absolute control, domination, and omnipotence.</p>
+      <p>At the core of the serial offender's pathology is a highly structured, persistent fantasy world. Criminological studies suggest that for the individual who eventually commits multiple homicide, fantasy functions as a crucial coping mechanism during formative, traumatic years [1]. When faced with absolute powerlessness in their domestic environments, the individual retreats into internal scenarios of absolute control, domination, and omnipotence.</p>
       <blockquote>"Fantasy is the psychological blueprint for the physical act of destruction. It does not merely accompany the crime; it drives it, refines it, and demands its eventual repetition."</blockquote>
       <p>Over time, these fantasies become increasingly sadistic and ritualized. The transition from pure fantasy to active behavior is a critical juncture. Once the physical boundary is crossed, the offender discovers a profound discrepancy between the perfect control of the mental fantasy and the unpredictable reality of the physical world. This discrepancy drives the repetitive cycle of haptic seeking and ritualistic escalation, as the offender repeatedly attempts to recreate the absolute control imagined in their mind.</p>
 
@@ -27,7 +27,7 @@ export const INITIAL_SEED_ARTICLES: Article[] = [
       <ul>
         <li><strong>Severe Neurological Under-Arousal:</strong> Many serial offenders exhibit abnormal prefrontal cortex activity, resulting in a deficit in emotional empathy, poor impulse control, and an extremely high threshold for boredom and physiological arousal.</li>
         <li><strong>Developmental Attachment Disruptions:</strong> Chronic childhood abuse, severe neglect, and the absence of a stable primary caretaker undermine the child's capacity for empathy, leading to severe personality fragmentation.</li>
-        <li><strong>The McDonald Triad:</strong> While debated, historical indicators such as persistent enuresis, pyromania, and cruelty to animals are often noted as early markers of systemic behavioral dysregulation.</li>
+        <li><strong>The McDonald Triad:</strong> While debated, historical indicators such as persistent enuresis, pyromania, and cruelty to animals are often noted as early markers of systemic behavioral dysregulation [2].</li>
       </ul>
 
       <h2>Conclusion</h2>
@@ -61,11 +61,11 @@ export const INITIAL_SEED_ARTICLES: Article[] = [
     excerpt: 'An exploration of Robert Michels’ famous "Iron Law of Oligarchy" and its persistence inside supposedly democratic institutions, administrative systems, and digital networks.',
     content: `
       <h2>Introduction</h2>
-      <p>Why do organizations designed to advance democratic values almost invariably consolidate power in the hands of a small elite? In 1911, sociologist Robert Michels formulated what he termed the "Iron Law of Oligarchy": <em>"Who says organization, says oligarchy."</em> This paper investigates Michels' structural thesis, examining how administrative necessity, psychological asymmetrical traits, and institutional incentives collude to centralize influence.</p>
+      <p>Why do organizations designed to advance democratic values almost invariably consolidate power in the hands of a small elite? In 1911, sociologist Robert Michels formulated what he termed the "Iron Law of Oligarchy": <em>"Who says organization, says oligarchy."</em> [1] This paper investigates Michels' structural thesis, examining how administrative necessity, psychological asymmetrical traits, and institutional incentives collude to centralize influence.</p>
       
       <h2>The Structural Necessity of Expertise</h2>
       <p>The primary driver of power centralization is administrative necessity. In a small, primitive group, direct collective decision-making is feasible. However, as an organization expands, its administrative burdens grow exponentially. Direct democracy becomes inefficient and gridlocked.</p>
-      <p>To survive and achieve its institutional objectives, the organization must specialize. It appoints committees, delegates authority, and hires full-time managers. This structural specialization immediately establishes an information asymmetry:</p>
+      <p>To survive and achieve its institutional objectives, the organization must specialize. It appoints committees, delegates authority, and hires full-time managers. This structural specialization immediately establishes an information asymmetry [2]:</p>
       <blockquote>"The administrative elite commands specialized procedural knowledge, direct control over channels of communication, and continuous focus that the broader membership, divided by their own private concerns, cannot match."</blockquote>
       <p>Consequently, the membership becomes dependent on the administrative class. The leadership's specialized skill set transforms their temporary administrative role into a permanent position of sovereign control.</p>
 

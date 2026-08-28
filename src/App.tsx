@@ -73,6 +73,9 @@ import {
 } from 'lucide-react';
 
 import MarginaliaPanel from './components/MarginaliaPanel';
+import FloatingShareMenu from './components/FloatingShareMenu';
+import FootnotePopover, { ActiveFootnoteState } from './components/FootnotePopover';
+import { transformFootnotesInHtml } from './utils/footnoteTransformer';
 import { compileScholarlyPDF } from './utils/pdfCompiler';
 
 // Log view entries to firestore views_log
@@ -130,6 +133,9 @@ export default function App() {
   const [isMarginaliaOpen, setIsMarginaliaOpen] = useState(false);
   const [annotationParagraphIndex, setAnnotationParagraphIndex] = useState<number>(-1);
   const [annotationParagraphText, setAnnotationParagraphText] = useState<string | undefined>(undefined);
+
+  // Clickable Citation Footnote Popover State
+  const [activeFootnote, setActiveFootnote] = useState<ActiveFootnoteState | null>(null);
 
   // Toast Notification State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -532,7 +538,6 @@ export default function App() {
     setSavedArticles(updated);
   };
 
-
   // Synchronize browser history navigation (Back/Forward buttons)
   useEffect(() => {
     const handlePopState = () => {
@@ -578,6 +583,7 @@ export default function App() {
 
   // Handle article clicks (and increment read views in Firestore)
   const handleArticleClick = async (art: Article) => {
+    setActiveFootnote(null);
     setIsArticleViewLoading(true);
     setSelectedArticle(art);
     setActiveTab('article-view');
@@ -696,66 +702,66 @@ export default function App() {
     }
   };
 
-  // Helper to parse HTML content into interactive paragraphs and section nodes
+  // Jump to specific reference in bibliography and trigger highlight glow
+  const handleJumpToBibliography = (index: number) => {
+    const el = document.getElementById(`reference-${index}`) || document.getElementById('article-references-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.remove('reference-highlight-pulse');
+      void el.offsetWidth; // force browser layout reflow
+      el.classList.add('reference-highlight-pulse');
+    }
+  };
+
+  // Footnote and citation click handler on the article content body
+  const handleArticleBodyClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = (e.target as HTMLElement).closest('.footnote-ref-btn, [data-footnote-index], sup, a[href^="#ref"], a[href^="#fn"], a[href^="#footnote"], a[href^="#citation"]');
+    if (!target) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    let footnoteIndex = 1;
+    const datasetIdx = target.getAttribute('data-footnote-index');
+    if (datasetIdx) {
+      footnoteIndex = parseInt(datasetIdx, 10) || 1;
+    } else {
+      const match = target.textContent?.match(/\d+/);
+      if (match) footnoteIndex = parseInt(match[0], 10) || 1;
+    }
+
+    const rect = target.getBoundingClientRect();
+    const matchedSource = selectedArticle?.sources && selectedArticle.sources[footnoteIndex - 1]
+      ? selectedArticle.sources[footnoteIndex - 1]
+      : undefined;
+
+    setActiveFootnote({
+      index: footnoteIndex,
+      targetRect: {
+        top: rect.top + window.scrollY,
+        left: rect.left + window.scrollX,
+        bottom: rect.bottom + window.scrollY,
+        right: rect.right + window.scrollX,
+        width: rect.width,
+        height: rect.height,
+        clientX: rect.left,
+        clientY: rect.top,
+      },
+      source: matchedSource
+    });
+  };
+
+  // Helper to parse HTML content into interactive paragraphs and section nodes with clickable citation footnotes
   const renderInteractiveContent = (contentHtml: string) => {
     if (!contentHtml) return null;
-
-    // Split HTML by </p>, keeping paragraphs intact
-    const rawParagraphs = contentHtml.split('</p>');
-    const paragraphs = rawParagraphs
-      .map(p => {
-        const trimmed = p.trim();
-        if (!trimmed) return null;
-        if (trimmed.startsWith('<p>')) {
-          return trimmed + '</p>';
-        } else {
-          return '<p>' + trimmed + '</p>';
-        }
-      })
-      .filter(Boolean) as string[];
+    const transformedHtml = transformFootnotesInHtml(contentHtml);
 
     return (
-      <div className="flex flex-col gap-6 relative select-text selection:bg-blood selection:text-paper">
-        {paragraphs.map((p, idx) => {
-          // Check if this paragraph contains heading tags
-          const isHeading = p.includes('<h1') || p.includes('<h2') || p.includes('<h3') || p.includes('<h4');
-          const plainText = p.replace(/<[^>]*>/g, '').trim();
-
-          // Skip if empty paragraph
-          if (!plainText) return null;
-          
-          return (
-            <div 
-              key={idx} 
-              className={`group relative flex flex-col md:flex-row gap-4 items-start ${
-                isHeading ? 'mt-4' : ''
-              }`}
-            >
-              {/* Paragraph Content */}
-              <div 
-                className="flex-1 font-serif text-base md:text-lg leading-relaxed text-paper/70 hover:text-paper transition-colors duration-200"
-                dangerouslySetInnerHTML={{ __html: p }}
-              />
-              
-              {/* Side Trigger Button */}
-              <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center md:absolute md:-right-10 md:top-1/2 md:-translate-y-1/2 z-10 shrink-0 mt-2 md:mt-0">
-                <button
-                  onClick={() => {
-                    setAnnotationParagraphIndex(idx);
-                    setAnnotationParagraphText(plainText);
-                    setIsMarginaliaOpen(true);
-                  }}
-                  className="p-1.5 rounded bg-[#0c0c0c] hover:bg-blood/20 border border-paper/10 text-paper/40 hover:text-blood transition-all cursor-pointer shadow-md flex items-center gap-1 font-sans text-[8px] uppercase tracking-wider px-2"
-                  title="Discuss & review this section"
-                >
-                  <MessageSquare size={10} />
-                  <span>Discuss</span>
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <div 
+        className="article-content select-text selection:bg-blood selection:text-paper"
+        onClick={handleArticleBodyClick}
+        dangerouslySetInnerHTML={{ __html: transformedHtml }}
+      />
     );
   };
 
@@ -1550,7 +1556,7 @@ export default function App() {
           isArticleViewLoading || !selectedArticle ? (
             <ArticleSkeleton />
           ) : (
-            <div className="py-12 md:py-16 px-6 max-w-5xl mx-auto fade-in select-text">
+            <div className="py-8 sm:py-12 md:py-16 px-4 sm:px-6 md:px-8 max-w-4xl mx-auto fade-in select-text">
             {/* Back to Home Navigation */}
             <button 
               onClick={() => {
@@ -1890,6 +1896,28 @@ export default function App() {
           articleTitle={selectedArticle.title}
           paragraphIndex={annotationParagraphIndex}
           paragraphText={annotationParagraphText}
+        />
+      )}
+
+      {/* Floating Share Action Menu for Active Article Reading */}
+      {activeTab === 'article-view' && selectedArticle && (
+        <FloatingShareMenu
+          article={selectedArticle}
+          isBookmarked={savedArticles.some(a => a.articleId === selectedArticle.id)}
+          onBookmarkToggle={() => handleToggleSaveArticle(selectedArticle)}
+          onCopyLinkNotification={(msg) => {
+            setToastMessage(msg);
+            setTimeout(() => setToastMessage(null), 3000);
+          }}
+        />
+      )}
+
+      {/* Interactive Citation Footnote Popover Overlay */}
+      {activeTab === 'article-view' && activeFootnote && (
+        <FootnotePopover
+          footnote={activeFootnote}
+          onClose={() => setActiveFootnote(null)}
+          onJumpToBibliography={handleJumpToBibliography}
         />
       )}
 

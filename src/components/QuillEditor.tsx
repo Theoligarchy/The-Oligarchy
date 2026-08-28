@@ -31,6 +31,7 @@ export default function QuillEditor({ value, onChange, placeholder = 'Write your
       const toolbarOptions = [
         [{ header: [1, 2, 3, false] }],
         ['bold', 'italic', 'underline', 'blockquote'],
+        [{ script: 'sub' }, { script: 'super' }],
         [{ list: 'ordered' }, { list: 'bullet' }],
         ['link', 'image', 'video'],
         ['clean']

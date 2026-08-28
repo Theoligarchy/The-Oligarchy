@@ -7,6 +7,7 @@ import {
   Twitter, 
   Linkedin, 
   MessageSquare, 
+  Mail,
   Instagram, 
   ExternalLink, 
   Info, 
@@ -260,6 +261,21 @@ export default function ShareMenu({ article }: ShareMenuProps) {
                     <MessageSquare size={11} className="text-paper/60 group-hover:text-[#25D366]" />
                   </div>
                   <span className="font-serif text-xs">Send on WhatsApp</span>
+                </div>
+                <ChevronRight size={10} className="text-paper/20" />
+              </a>
+
+              {/* Option: Email Dispatch */}
+              <a
+                href={`mailto:?subject=${encodeURIComponent('Scholarly Analysis: ' + shareTitle)}&body=${encodeURIComponent('I thought you would find this investigation from The Oligarchy insightful:\n\n"' + article.title + '"\n\n' + (article.subtitle || article.excerpt ? (article.subtitle || article.excerpt) + '\n\n' : '') + 'Access the full analysis & citations at:\n' + shareUrl + '\n\n— The Oligarchy')}`}
+                onClick={() => setIsOpen(false)}
+                className="w-full px-3 py-2.5 hover:bg-paper/[0.03] rounded-sm transition-colors flex items-center justify-between text-paper/85 hover:text-paper cursor-pointer group"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-6 h-6 rounded-full bg-paper/5 flex items-center justify-center group-hover:bg-amber-500/20 transition-colors">
+                    <Mail size={11} className="text-paper/60 group-hover:text-amber-300" />
+                  </div>
+                  <span className="font-serif text-xs">Share via Email</span>
                 </div>
                 <ChevronRight size={10} className="text-paper/20" />
               </a>
