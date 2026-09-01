@@ -1,14 +1,18 @@
 import { db } from '../firebase';
 import { 
   collection, 
-  getDocs, 
-  addDoc, 
-  query, 
-  orderBy, 
-  limit, 
-  where 
+  getDocs
 } from 'firebase/firestore';
 import { Article, ViewLog } from '../types';
+import { detectDeviceType, detectBrowser, trackPageView } from './analyticsTracker';
+
+export const logArticleReadEvent = async (
+  article: Article,
+  _readDurationSecs?: number,
+  _scrollDepth?: number
+) => {
+  return trackPageView('article', article);
+};
 
 export interface ExtendedViewLog extends ViewLog {
   id?: string;
@@ -17,11 +21,16 @@ export interface ExtendedViewLog extends ViewLog {
   category: string;
   timestamp: number;
   readDurationSeconds?: number;
+  scrollDepthPercent?: number;
   authorId?: string;
   authorEmail?: string;
+  visitorId?: string;
+  sessionId?: string;
+  isReturning?: boolean;
   userAgent?: string;
   referrer?: string;
   deviceType?: 'desktop' | 'mobile' | 'tablet';
+  browser?: string;
 }
 
 export interface DailyReadershipTrend {
@@ -38,33 +47,43 @@ export interface ArticleLogAnalytics {
   readTimeEstimateStr: string;
   estimatedMinutes: number;
   loggedViews: number;
+  uniqueReaders: number;
   totalReadMinutes: number;
   avgReadMinutes: number;
-  completionRatePercent: number;
+  avgReadDurationSeconds: number;
+  avgScrollDepthPercent: number;
   lastViewedAt: number | null;
   topReferrers: Array<{ source: string; count: number }>;
 }
 
 export interface ContributorViewsAnalytics {
   totalLoggedViews: number;
+  uniqueVisitorsCount: number;
+  returningVisitorsCount: number;
   totalReadTimeMinutes: number;
   totalReadHours: number;
   avgReadDurationMinutes: number;
-  completionRatePercent: number;
+  avgReadDurationSeconds: number;
+  avgScrollDepthPercent: number;
   dailyTrends7D: DailyReadershipTrend[];
   dailyTrends14D: DailyReadershipTrend[];
   dailyTrends30D: DailyReadershipTrend[];
   perArticleAnalytics: Record<string, ArticleLogAnalytics>;
   referrersList: Array<{ source: string; count: number; percentage: number }>;
+  browserBreakdown: Array<{ browser: string; count: number; percentage: number }>;
   hourlyDistribution: Array<{ hour: number; label: string; count: number }>;
   deviceBreakdown: {
     desktop: number;
     mobile: number;
     tablet: number;
+    desktopPercent: number;
+    mobilePercent: number;
+    tabletPercent: number;
   };
   recentLogs: ExtendedViewLog[];
   lastUpdated: number;
   isLiveConnection: boolean;
+  hasData: boolean;
 }
 
 /**
@@ -77,32 +96,46 @@ export function extractArticleMinutes(readTimeStr?: string, content?: string): n
   }
   if (content) {
     const wordCount = content.replace(/<[^>]*>/g, ' ').trim().split(/\s+/).filter(Boolean).length;
-    return Math.max(3, Math.round(wordCount / 200));
+    return Math.max(1, Math.round(wordCount / 200));
   }
-  return 8;
+  return 5;
 }
 
 /**
  * Parse referrer into clean human-readable source category
  */
-function normalizeReferrer(ref?: string): string {
-  if (!ref || ref === 'direct' || ref.includes('localhost') || ref.includes('theoligarchy')) {
-    return 'Direct Scholarly Access';
+export function normalizeReferrer(ref?: string): string {
+  if (!ref || ref === '' || ref === 'direct' || ref.includes('localhost') || ref.includes('theoligarchy')) {
+    return 'Direct Access';
   }
-  if (ref.includes('google') || ref.includes('scholar') || ref.includes('bing') || ref.includes('duckduckgo')) {
-    return 'Google Scholar & Search';
+  const r = ref.toLowerCase();
+  if (r.includes('google') || r.includes('scholar') || r.includes('bing') || r.includes('duckduckgo')) {
+    return 'Search Engines (Google/Scholar)';
   }
-  if (ref.includes('twitter') || ref.includes('t.co') || ref.includes('x.com') || ref.includes('linkedin') || ref.includes('substack')) {
-    return 'Academic Network & Social';
+  if (r.includes('twitter') || r.includes('t.co') || r.includes('x.com')) {
+    return 'X (Twitter)';
   }
-  if (ref.includes('doi') || ref.includes('crossref') || ref.includes('researchgate') || ref.includes('ssrn')) {
-    return 'Cross-Reference & DOI Citation';
+  if (r.includes('linkedin')) {
+    return 'LinkedIn';
   }
-  return 'University & Institutional Repositories';
+  if (r.includes('facebook') || r.includes('fb')) {
+    return 'Facebook';
+  }
+  if (r.includes('reddit')) {
+    return 'Reddit';
+  }
+  if (r.includes('substack')) {
+    return 'Substack';
+  }
+  if (r.includes('doi') || r.includes('crossref') || r.includes('zenodo') || r.includes('researchgate') || r.includes('ssrn')) {
+    return 'DOI & Academic Cross-Ref';
+  }
+  return 'External Referral';
 }
 
 /**
- * Fetch and aggregate views_log collection for a specific contributor's articles
+ * Fetch and aggregate views_log collection for a specific contributor's articles or all articles
+ * STRICT ZERO-FABRICATION: If 0 logs exist, all counts are 0 with no synthetic fallbacks.
  */
 export async function fetchContributorViewsLogAnalytics(
   authorArticles: Article[],
@@ -125,27 +158,36 @@ export async function fetchContributorViewsLogAnalytics(
     const snapshot = await getDocs(viewsLogRef);
 
     snapshot.forEach(docSnap => {
-      const data = docSnap.data() as ExtendedViewLog;
+      const data = docSnap.data() as Partial<ExtendedViewLog>;
       const logItem: ExtendedViewLog = {
         id: docSnap.id,
         articleId: data.articleId || '',
         articleTitle: data.articleTitle || '',
-        category: data.category || 'politics',
-        timestamp: data.timestamp || Date.now(),
-        readDurationSeconds: data.readDurationSeconds,
+        category: data.category || 'general',
+        timestamp: Number(data.timestamp) || Date.now(),
+        readDurationSeconds: typeof data.readDurationSeconds === 'number' ? data.readDurationSeconds : 0,
+        scrollDepthPercent: typeof data.scrollDepthPercent === 'number' ? data.scrollDepthPercent : 0,
         authorId: data.authorId,
         authorEmail: data.authorEmail,
+        visitorId: data.visitorId,
+        sessionId: data.sessionId,
+        isReturning: Boolean(data.isReturning),
         userAgent: data.userAgent,
         referrer: data.referrer,
-        deviceType: data.userAgent?.includes('Mobi') ? 'mobile' : data.userAgent?.includes('Tablet') ? 'tablet' : 'desktop'
+        deviceType: data.deviceType || detectDeviceType(data.userAgent),
+        browser: data.browser || detectBrowser(data.userAgent)
       };
 
-      // Check if this view log belongs to this contributor's articles
-      const matchesArticle = authorArticleIds.has(logItem.articleId);
-      const matchesAuthor = (contributorId && logItem.authorId === contributorId) ||
-                            (contributorEmail && logItem.authorEmail?.toLowerCase() === contributorEmail.toLowerCase());
+      // Filter to author's articles if specified
+      if (authorArticleIds.size > 0) {
+        const matchesArticle = authorArticleIds.has(logItem.articleId);
+        const matchesAuthor = (contributorId && logItem.authorId === contributorId) ||
+                              (contributorEmail && logItem.authorEmail?.toLowerCase() === contributorEmail.toLowerCase());
 
-      if (matchesArticle || matchesAuthor) {
+        if (matchesArticle || matchesAuthor) {
+          rawLogs.push(logItem);
+        }
+      } else {
         rawLogs.push(logItem);
       }
     });
@@ -168,38 +210,70 @@ export async function fetchContributorViewsLogAnalytics(
     perArticleAnalytics[art.id] = {
       articleId: art.id,
       title: art.title,
-      category: art.category || 'politics',
+      category: art.category || 'general',
       readTimeEstimateStr: art.readTime || `${estMins} min read`,
       estimatedMinutes: estMins,
       loggedViews: 0,
+      uniqueReaders: 0,
       totalReadMinutes: 0,
       avgReadMinutes: 0,
-      completionRatePercent: 0,
+      avgReadDurationSeconds: 0,
+      avgScrollDepthPercent: 0,
       lastViewedAt: null,
       topReferrers: []
     };
   });
 
   const refCountsOverall: Record<string, number> = {};
+  const browserCountsOverall: Record<string, number> = {};
   const hourCounts: number[] = new Array(24).fill(0);
   let desktopCount = 0;
   let mobileCount = 0;
   let tabletCount = 0;
 
   const articleReferrerCounts: Record<string, Record<string, number>> = {};
+  const articleVisitors: Record<string, Set<string>> = {};
+  const articleScrollDepths: Record<string, number[]> = {};
+  const articleReadDurations: Record<string, number[]> = {};
+  const allUniqueVisitors = new Set<string>();
+  let returningCount = 0;
 
   rawLogs.forEach(log => {
-    const art = articleMap.get(log.articleId);
-    const estMins = art ? extractArticleMinutes(art.readTime, art.content) : 8;
-    const readDurationMins = log.readDurationSeconds 
-      ? (log.readDurationSeconds / 60)
-      : (estMins * 0.85);
+    const readSeconds = log.readDurationSeconds || 0;
+    const readMins = readSeconds / 60;
+
+    if (log.visitorId) {
+      allUniqueVisitors.add(log.visitorId);
+    }
+    if (log.isReturning) {
+      returningCount++;
+    }
 
     // Update per article
     if (perArticleAnalytics[log.articleId]) {
       const artStats = perArticleAnalytics[log.articleId];
       artStats.loggedViews += 1;
-      artStats.totalReadMinutes += readDurationMins;
+      artStats.totalReadMinutes += readMins;
+      
+      if (!articleVisitors[log.articleId]) {
+        articleVisitors[log.articleId] = new Set<string>();
+      }
+      if (log.visitorId) {
+        articleVisitors[log.articleId].add(log.visitorId);
+      }
+
+      if (!articleScrollDepths[log.articleId]) {
+        articleScrollDepths[log.articleId] = [];
+      }
+      if (typeof log.scrollDepthPercent === 'number' && log.scrollDepthPercent > 0) {
+        articleScrollDepths[log.articleId].push(log.scrollDepthPercent);
+      }
+
+      if (!articleReadDurations[log.articleId]) {
+        articleReadDurations[log.articleId] = [];
+      }
+      articleReadDurations[log.articleId].push(readSeconds);
+
       if (!artStats.lastViewedAt || log.timestamp > artStats.lastViewedAt) {
         artStats.lastViewedAt = log.timestamp;
       }
@@ -215,6 +289,10 @@ export async function fetchContributorViewsLogAnalytics(
     const normSource = normalizeReferrer(log.referrer);
     refCountsOverall[normSource] = (refCountsOverall[normSource] || 0) + 1;
 
+    // Overall Browsers
+    const browserName = log.browser || detectBrowser(log.userAgent);
+    browserCountsOverall[browserName] = (browserCountsOverall[browserName] || 0) + 1;
+
     // Hourly distribution
     const d = new Date(log.timestamp);
     const h = d.getHours();
@@ -225,30 +303,31 @@ export async function fetchContributorViewsLogAnalytics(
     // Devices
     if (log.deviceType === 'desktop') desktopCount++;
     else if (log.deviceType === 'mobile') mobileCount++;
-    else tabletCount++;
+    else if (log.deviceType === 'tablet') tabletCount++;
+    else desktopCount++;
   });
 
-  // Calculate final averages per article
+  // Calculate averages per article
   Object.values(perArticleAnalytics).forEach(stat => {
-    if (stat.loggedViews > 0) {
-      stat.avgReadMinutes = Number((stat.totalReadMinutes / stat.loggedViews).toFixed(1));
-      stat.completionRatePercent = Number(Math.min(98, Math.max(50, (stat.avgReadMinutes / stat.estimatedMinutes) * 100)).toFixed(1));
-    } else {
-      // If no detailed view logs recorded, rely solely on article's total views
-      const art = articleMap.get(stat.articleId);
-      const views = art?.views || 0;
-      stat.loggedViews = views;
-      stat.totalReadMinutes = 0;
-      stat.avgReadMinutes = 0;
-      stat.completionRatePercent = 0;
-      stat.lastViewedAt = null;
-    }
+    const vSet = articleVisitors[stat.articleId];
+    stat.uniqueReaders = vSet ? vSet.size : (stat.loggedViews > 0 ? stat.loggedViews : 0);
+
+    const scrolls = articleScrollDepths[stat.articleId] || [];
+    stat.avgScrollDepthPercent = scrolls.length > 0 
+      ? Math.round(scrolls.reduce((a, b) => a + b, 0) / scrolls.length)
+      : 0;
+
+    const durations = articleReadDurations[stat.articleId] || [];
+    const totalSecs = durations.reduce((a, b) => a + b, 0);
+    stat.avgReadDurationSeconds = durations.length > 0 ? Math.round(totalSecs / durations.length) : 0;
+    stat.avgReadMinutes = Number((stat.avgReadDurationSeconds / 60).toFixed(1));
+    stat.totalReadMinutes = Number((totalSecs / 60).toFixed(1));
 
     const refMap = articleReferrerCounts[stat.articleId] || {};
     stat.topReferrers = Object.entries(refMap)
       .map(([source, count]) => ({ source, count }))
       .sort((a, b) => b.count - a.count)
-      .slice(0, 3);
+      .slice(0, 5);
   });
 
   // 2. Timeline Trends (7D, 14D, 30D)
@@ -260,20 +339,17 @@ export async function fetchContributorViewsLogAnalytics(
       const mm = String(dayDate.getMonth() + 1).padStart(2, '0');
       const dd = String(dayDate.getDate()).padStart(2, '0');
       const dateKey = `${yyyy}-${mm}-${dd}`;
-      const dayLabel = dayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      const dayLabel = dayDate.toLocaleDateString('en-GB', { weekday: 'short', month: 'short', day: 'numeric' });
 
-      // Count logs matching this day
       let dayViews = 0;
-      let dayReadMinutes = 0;
+      let dayReadSeconds = 0;
 
       rawLogs.forEach(log => {
         const logDate = new Date(log.timestamp);
         const logYMD = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
         if (logYMD === dateKey) {
           dayViews++;
-          const art = articleMap.get(log.articleId);
-          const est = art ? extractArticleMinutes(art.readTime, art.content) : 8;
-          dayReadMinutes += log.readDurationSeconds ? (log.readDurationSeconds / 60) : (est * 0.8);
+          dayReadSeconds += (log.readDurationSeconds || 0);
         }
       });
 
@@ -281,7 +357,7 @@ export async function fetchContributorViewsLogAnalytics(
         dateKey,
         label: dayLabel,
         viewCount: dayViews,
-        readMinutes: Math.round(dayReadMinutes)
+        readMinutes: Math.round(dayReadSeconds / 60)
       });
     }
     return result;
@@ -292,32 +368,42 @@ export async function fetchContributorViewsLogAnalytics(
   const dailyTrends30D = buildTrendDays(30);
 
   // Overall totals
-  const totalLoggedViews = rawLogs.length || authorArticles.reduce((acc, a) => acc + (a.views || 0), 0);
-  const totalReadTimeMinutes = Object.values(perArticleAnalytics).reduce((sum, a) => sum + a.totalReadMinutes, 0);
+  const totalLoggedViews = rawLogs.length;
+  const uniqueVisitorsCount = allUniqueVisitors.size || (totalLoggedViews > 0 ? totalLoggedViews : 0);
+  const totalReadTimeSeconds = rawLogs.reduce((sum, l) => sum + (l.readDurationSeconds || 0), 0);
+  const totalReadTimeMinutes = Math.round(totalReadTimeSeconds / 60);
   const totalReadHours = Number((totalReadTimeMinutes / 60).toFixed(1));
-  const avgReadDurationMinutes = totalLoggedViews > 0 ? Number((totalReadTimeMinutes / totalLoggedViews).toFixed(1)) : 0;
-  const completionRatePercent = totalLoggedViews > 0 
-    ? Number((Object.values(perArticleAnalytics).reduce((s, a) => s + (a.completionRatePercent || 0), 0) / (Object.values(perArticleAnalytics).filter(a => a.loggedViews > 0).length || 1)).toFixed(1))
+  const avgReadDurationSeconds = totalLoggedViews > 0 ? Math.round(totalReadTimeSeconds / totalLoggedViews) : 0;
+  const avgReadDurationMinutes = Number((avgReadDurationSeconds / 60).toFixed(1));
+
+  const allScrolls = rawLogs.map(l => l.scrollDepthPercent || 0).filter(s => s > 0);
+  const avgScrollDepthPercent = allScrolls.length > 0 
+    ? Math.round(allScrolls.reduce((a, b) => a + b, 0) / allScrolls.length) 
     : 0;
 
-  // Referrers List
-  const totalRefs = Object.values(refCountsOverall).reduce((a, b) => a + b, 0) || 1;
-  const referrersList = Object.entries(refCountsOverall)
-    .map(([source, count]) => ({
-      source,
-      count,
-      percentage: Number(((count / totalRefs) * 100).toFixed(1))
-    }))
-    .sort((a, b) => b.count - a.count);
+  // Referrers List - ZERO FABRICATION (empty if no logs)
+  const totalRefs = Object.values(refCountsOverall).reduce((a, b) => a + b, 0);
+  const referrersList = totalRefs > 0
+    ? Object.entries(refCountsOverall)
+        .map(([source, count]) => ({
+          source,
+          count,
+          percentage: Number(((count / totalRefs) * 100).toFixed(1))
+        }))
+        .sort((a, b) => b.count - a.count)
+    : [];
 
-  if (referrersList.length === 0) {
-    referrersList.push(
-      { source: 'Direct Scholarly Access', count: Math.round(totalLoggedViews * 0.44), percentage: 44.0 },
-      { source: 'Google Scholar & Search', count: Math.round(totalLoggedViews * 0.28), percentage: 28.0 },
-      { source: 'Cross-Reference & DOI Citation', count: Math.round(totalLoggedViews * 0.16), percentage: 16.0 },
-      { source: 'Academic Network & Social', count: Math.round(totalLoggedViews * 0.12), percentage: 12.0 }
-    );
-  }
+  // Browser Breakdown
+  const totalBrowsers = Object.values(browserCountsOverall).reduce((a, b) => a + b, 0);
+  const browserBreakdown = totalBrowsers > 0
+    ? Object.entries(browserCountsOverall)
+        .map(([browser, count]) => ({
+          browser,
+          count,
+          percentage: Number(((count / totalBrowsers) * 100).toFixed(1))
+        }))
+        .sort((a, b) => b.count - a.count)
+    : [];
 
   // Hourly Distribution
   const hourlyDistribution = hourCounts.map((count, hour) => {
@@ -325,64 +411,36 @@ export async function fetchContributorViewsLogAnalytics(
     return { hour, label: hourLabel, count };
   });
 
+  const totalDevices = desktopCount + mobileCount + tabletCount;
+  const deviceBreakdown = {
+    desktop: desktopCount,
+    mobile: mobileCount,
+    tablet: tabletCount,
+    desktopPercent: totalDevices > 0 ? Math.round((desktopCount / totalDevices) * 100) : 0,
+    mobilePercent: totalDevices > 0 ? Math.round((mobileCount / totalDevices) * 100) : 0,
+    tabletPercent: totalDevices > 0 ? Math.round((tabletCount / totalDevices) * 100) : 0
+  };
+
   return {
     totalLoggedViews,
-    totalReadTimeMinutes: Math.round(totalReadTimeMinutes),
+    uniqueVisitorsCount,
+    returningVisitorsCount: returningCount,
+    totalReadTimeMinutes,
     totalReadHours,
     avgReadDurationMinutes,
-    completionRatePercent,
+    avgReadDurationSeconds,
+    avgScrollDepthPercent,
     dailyTrends7D,
     dailyTrends14D,
     dailyTrends30D,
     perArticleAnalytics,
     referrersList,
+    browserBreakdown,
     hourlyDistribution,
-    deviceBreakdown: {
-      desktop: desktopCount || Math.round(totalLoggedViews * 0.68),
-      mobile: mobileCount || Math.round(totalLoggedViews * 0.26),
-      tablet: tabletCount || Math.round(totalLoggedViews * 0.06)
-    },
-    recentLogs: rawLogs.slice(0, 15),
+    deviceBreakdown,
+    recentLogs: rawLogs.slice(0, 20),
     lastUpdated: now,
-    isLiveConnection: isLive
+    isLiveConnection: isLive,
+    hasData: totalLoggedViews > 0
   };
-}
-
-/**
- * Record a new view log entry directly to Firestore 'views_log' collection
- */
-export async function logArticleReadEvent(
-  article: Article,
-  authorId?: string,
-  authorEmail?: string,
-  readDurationSeconds?: number,
-  referrerSource?: string
-): Promise<ExtendedViewLog | null> {
-  const estMins = extractArticleMinutes(article.readTime, article.content);
-  const newLog: Omit<ExtendedViewLog, 'id'> = {
-    articleId: article.id,
-    articleTitle: article.title,
-    category: article.category || 'politics',
-    timestamp: Date.now(),
-    readDurationSeconds: readDurationSeconds || (estMins * 60),
-    authorId: authorId || article.authorId,
-    authorEmail: authorEmail || article.createdByEmail || 'theoligarchy.ppj@gmail.com',
-    referrer: referrerSource || (typeof document !== 'undefined' ? (document.referrer || 'direct') : 'direct'),
-    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Node/Client'
-  };
-
-  try {
-    const colRef = collection(db, 'views_log');
-    const docRef = await addDoc(colRef, newLog);
-    return {
-      id: docRef.id,
-      ...newLog
-    };
-  } catch (err) {
-    console.warn('Failed to append to Firestore views_log:', err);
-    return {
-      id: `local-log-${Date.now()}`,
-      ...newLog
-    };
-  }
 }

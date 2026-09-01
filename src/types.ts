@@ -222,8 +222,17 @@ export interface ViewLog {
   articleTitle: string;
   category: string;
   timestamp: number; // millisecond timestamp
+  visitorId?: string;
+  sessionId?: string;
+  isReturning?: boolean;
+  deviceType?: 'desktop' | 'mobile' | 'tablet';
+  browser?: string;
   userAgent?: string;
   referrer?: string;
+  readDurationSeconds?: number;
+  scrollDepthPercent?: number;
+  authorId?: string;
+  authorEmail?: string;
 }
 
 export interface PeerReply {

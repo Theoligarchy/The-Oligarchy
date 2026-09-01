@@ -325,9 +325,9 @@ export default function ContributorDashboard({
       }
       const m = perArticleMetrics[a.id] || {
         views: a.views || 0,
-        citations: Math.max(3, Math.floor((a.views || 0) * 0.08)),
-        bookmarks: Math.max(2, Math.floor((a.views || 0) * 0.04)),
-        annotations: Math.max(1, Math.floor((a.views || 0) * 0.02))
+        citations: 0,
+        bookmarks: 0,
+        annotations: 0
       };
       categoryBreakdown[cat].count += 1;
       categoryBreakdown[cat].views += (a.views || 0);
@@ -346,8 +346,8 @@ export default function ContributorDashboard({
     const longestResearchPaper = sortedByReadTime[0] || null;
 
     const sortedByEngagement = [...pubList].sort((a, b) => {
-      const ma = perArticleMetrics[a.id] || { views: a.views || 0, bookmarks: 2, citations: 3, annotations: 1 };
-      const mb = perArticleMetrics[b.id] || { views: b.views || 0, bookmarks: 2, citations: 3, annotations: 1 };
+      const ma = perArticleMetrics[a.id] || { views: a.views || 0, bookmarks: 0, citations: 0, annotations: 0 };
+      const mb = perArticleMetrics[b.id] || { views: b.views || 0, bookmarks: 0, citations: 0, annotations: 0 };
       const scoreA = (ma.bookmarks + ma.citations + ma.annotations) / Math.max(a.views || 1, 1);
       const scoreB = (mb.bookmarks + mb.citations + mb.annotations) / Math.max(b.views || 1, 1);
       return scoreB - scoreA;
@@ -355,8 +355,8 @@ export default function ContributorDashboard({
     const mostEngagedPaper = sortedByEngagement[0] || null;
 
     const sortedByCitations = [...pubList].sort((a, b) => {
-      const ma = perArticleMetrics[a.id]?.citations || Math.max(3, Math.floor((a.views || 0) * 0.08));
-      const mb = perArticleMetrics[b.id]?.citations || Math.max(3, Math.floor((b.views || 0) * 0.08));
+      const ma = perArticleMetrics[a.id]?.citations || 0;
+      const mb = perArticleMetrics[b.id]?.citations || 0;
       return mb - ma;
     });
     const topCitedPaper = sortedByCitations[0] || null;
@@ -1223,7 +1223,7 @@ https://theoligarchy.in
                       <Laptop size={14} className="text-blue-300" /> Desktop Workstations
                     </span>
                     <span className="font-mono font-bold text-paper">
-                      {viewsLogAnalytics?.deviceBreakdown.desktop || 68}%
+                      {viewsLogAnalytics?.deviceBreakdown.desktopPercent ?? 0}%
                     </span>
                   </div>
 
@@ -1232,7 +1232,7 @@ https://theoligarchy.in
                       <Smartphone size={14} className="text-amber-300" /> Mobile &amp; e-Readers
                     </span>
                     <span className="font-mono font-bold text-paper">
-                      {viewsLogAnalytics?.deviceBreakdown.mobile || 26}%
+                      {viewsLogAnalytics?.deviceBreakdown.mobilePercent ?? 0}%
                     </span>
                   </div>
 
@@ -1241,7 +1241,7 @@ https://theoligarchy.in
                       <Layers size={14} className="text-purple-300" /> Tablets &amp; Consoles
                     </span>
                     <span className="font-mono font-bold text-paper">
-                      {viewsLogAnalytics?.deviceBreakdown.tablet || 6}%
+                      {viewsLogAnalytics?.deviceBreakdown.tabletPercent ?? 0}%
                     </span>
                   </div>
                 </div>
@@ -1301,16 +1301,18 @@ https://theoligarchy.in
                 </div>
                 <div>
                   <span className="font-mono text-xl font-bold text-emerald-300">
-                    ~{Math.round((viewsLogAnalytics?.totalLoggedViews || performanceStats.totalPubViews) * 0.76).toLocaleString()}
+                    {viewsLogAnalytics?.uniqueVisitorsCount ? viewsLogAnalytics.uniqueVisitorsCount.toLocaleString() : (performanceStats.totalPubViews > 0 ? performanceStats.totalPubViews.toLocaleString() : '0')}
                   </span>
                   <span className="font-serif text-[11px] text-paper/60 block mt-0.5">
-                    Sustained Full Reads ({viewsLogAnalytics?.avgReadDurationMinutes || performanceStats.avgReadTimeMinutes.toFixed(1)}m avg)
+                    Authentic Reader Sessions ({viewsLogAnalytics?.avgReadDurationMinutes ? `${viewsLogAnalytics.avgReadDurationMinutes}m avg` : '0m avg'})
                   </span>
                 </div>
                 <div className="w-full bg-paper/5 h-1.5 rounded-full overflow-hidden">
-                  <div className="bg-emerald-500 h-full w-[76%]" />
+                  <div className="bg-emerald-500 h-full" style={{ width: viewsLogAnalytics?.totalLoggedViews ? `${Math.min(100, Math.round(((viewsLogAnalytics.uniqueVisitorsCount || 1) / viewsLogAnalytics.totalLoggedViews) * 100))}%` : '0%' }} />
                 </div>
-                <span className="font-mono text-[9px] text-emerald-400/70">~76.8% attention retention</span>
+                <span className="font-mono text-[9px] text-emerald-400/70">
+                  {viewsLogAnalytics?.totalLoggedViews ? `${Math.round(((viewsLogAnalytics.uniqueVisitorsCount || 1) / viewsLogAnalytics.totalLoggedViews) * 100)}% verified reader retention` : '0% retention'}
+                </span>
               </div>
 
               {/* Funnel Stage 3 */}
@@ -2208,9 +2210,9 @@ https://theoligarchy.in
               {(() => {
                 const metrics = perArticleMetrics[selectedPaperForMetrics.id] || {
                   views: selectedPaperForMetrics.views || 0,
-                  citations: Math.max(3, Math.floor((selectedPaperForMetrics.views || 0) * 0.08)),
-                  bookmarks: Math.max(2, Math.floor((selectedPaperForMetrics.views || 0) * 0.04)),
-                  annotations: Math.max(1, Math.floor((selectedPaperForMetrics.views || 0) * 0.02))
+                  citations: 0,
+                  bookmarks: 0,
+                  annotations: 0
                 };
 
                 return (
@@ -2221,7 +2223,7 @@ https://theoligarchy.in
                     </div>
 
                     <div className="bg-navy border border-paper/10 p-3 rounded-xs flex flex-col justify-between">
-                      <span className="font-sans text-[8px] uppercase tracking-wider text-blue-400/70">Est. Citations</span>
+                      <span className="font-sans text-[8px] uppercase tracking-wider text-blue-400/70">Citations</span>
                       <span className="font-mono text-xl font-bold text-blue-300 mt-1">{metrics.citations}</span>
                     </div>
 

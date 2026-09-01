@@ -78,19 +78,12 @@ import FootnotePopover, { ActiveFootnoteState } from './components/FootnotePopov
 import AuthorBioCard from './components/AuthorBioCard';
 import { transformFootnotesInHtml } from './utils/footnoteTransformer';
 import { compileScholarlyPDF } from './utils/pdfCompiler';
+import { trackPageView, setupScrollTracker, stopActiveHeartbeat } from './utils/analyticsTracker';
 
-// Log view entries to firestore views_log
+// Log view entries to firestore views_log with real device, session, and reading duration tracking
 const logViewEntry = async (art: Article) => {
   try {
-    const viewsLogRef = collection(db, 'views_log');
-    await addDoc(viewsLogRef, {
-      articleId: art.id,
-      articleTitle: art.title,
-      category: art.category || 'politics',
-      timestamp: Date.now(),
-      userAgent: navigator.userAgent,
-      referrer: document.referrer || 'direct'
-    });
+    await trackPageView('article', art);
   } catch (e) {
     console.error("Failed to write views log:", e);
   }
@@ -204,24 +197,24 @@ export default function App() {
 
   // Synchronize SEO & Open Graph / Twitter Meta Tags dynamically in browser
   useEffect(() => {
-    let title = "The Oligarchy — Independent Research Publication";
-    let desc = "Independent research platform exploring crime, human behaviour, and systems of power.";
+    let title = "The Oligarchy : Independent Publication";
+    let desc = "Independent research platform exploring crime, human behaviour, and systems of power. The Oligarchy : Independent Publication";
     let image = "https://theoligarchy.in/logo_highres.png";
     let url = "https://theoligarchy.in";
 
     if (activeTab === 'article-view' && selectedArticle) {
-      title = selectedArticle.seoTitle || `${selectedArticle.title} — The Oligarchy`;
-      desc = selectedArticle.seoDescription || selectedArticle.excerpt || desc;
+      title = selectedArticle.seoTitle || selectedArticle.metaTitle || `${selectedArticle.title} : The Oligarchy`;
+      desc = selectedArticle.seoDescription || selectedArticle.metaDescription || selectedArticle.excerpt || desc;
       image = selectedArticle.featuredImage || image;
       url = selectedArticle.canonicalUrl || `https://theoligarchy.in/?article=${selectedArticle.id}`;
     } else if (activeTab === 'about') {
-      title = "About Us — The Oligarchy";
+      title = "About Us : The Oligarchy";
       desc = "Learn about our mission, editorial policy, and investigative methodologies.";
     } else if (activeTab === 'editorial') {
-      title = "Editorial Principles — The Oligarchy";
+      title = "Editorial Principles : The Oligarchy";
       desc = "Our strict journalistic values, verification protocols, and ethical principles.";
     } else if (activeTab === 'contact') {
-      title = "Submit a Tip — The Oligarchy";
+      title = "Submit a Tip : The Oligarchy";
       desc = "Submit highly classified tips, leaks, or research material to our investigators.";
     }
 
@@ -270,6 +263,21 @@ export default function App() {
     updateMeta('meta[name="twitter:url"]', 'content', url);
 
   }, [activeTab, selectedArticle]);
+
+  // Real-Time Analytics Page Tracking & Active Session Lifecycle
+  useEffect(() => {
+    // Only track non-article page views here (article views are tracked in handleArticleClick)
+    if (activeTab !== 'article-view') {
+      trackPageView(activeTab, null);
+    }
+    
+    // Setup scroll tracking for attention calculation
+    const cleanupScroll = setupScrollTracker();
+
+    return () => {
+      cleanupScroll();
+    };
+  }, [activeTab]);
 
   const loadData = async () => {
     try {
@@ -477,32 +485,6 @@ export default function App() {
 
     return () => unsubscribe();
   }, []);
-
-  // Synchronize SEO Meta Title and Meta Description tags dynamically
-  useEffect(() => {
-    if (activeTab === 'article-view' && selectedArticle) {
-      const pageTitle = selectedArticle.metaTitle || selectedArticle.seoTitle || `${selectedArticle.title} | ${siteSettings.siteName}`;
-      document.title = pageTitle;
-
-      const pageDesc = selectedArticle.metaDescription || selectedArticle.seoDescription || selectedArticle.excerpt;
-      if (pageDesc) {
-        let metaDescTag = document.querySelector('meta[name="description"]');
-        if (!metaDescTag) {
-          metaDescTag = document.createElement('meta');
-          metaDescTag.setAttribute('name', 'description');
-          document.head.appendChild(metaDescTag);
-        }
-        metaDescTag.setAttribute('content', pageDesc);
-      }
-    } else {
-      document.title = `${siteSettings.siteName} — ${siteSettings.tagline}`;
-      const defaultDesc = siteSettings.aboutText || "Independent Journal of Criminology, Psyche & Politics";
-      const metaDescTag = document.querySelector('meta[name="description"]');
-      if (metaDescTag) {
-        metaDescTag.setAttribute('content', defaultDesc);
-      }
-    }
-  }, [activeTab, selectedArticle, siteSettings]);
 
   // Saved Reading List Action Handlers
   const handleToggleSaveArticle = async (article: Article) => {

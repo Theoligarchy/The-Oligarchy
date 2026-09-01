@@ -232,23 +232,16 @@ export async function compileContributorStats(
 
   const perArticleMetrics: Record<string, PaperMetricBreakdown> = {};
 
-  // Initialize metrics per article
+  // Initialize metrics per article with strictly authentic counts (0 default)
   authorArticles.forEach(a => {
-    const sourcesCount = a.sources?.length || 0;
-    const estimatedCitations = Math.max(sourcesCount * 2 + 1, Math.floor((a.views || 0) * 0.08));
     perArticleMetrics[a.id] = {
       articleId: a.id,
       views: a.views || 0,
-      citations: estimatedCitations,
+      citations: 0,
       bookmarks: 0,
       annotations: 0
     };
   });
-
-  // Approximate citations generated based on citations count or views ratio
-  const totalCitationsGenerated = authorArticles.reduce((acc, a) => {
-    return acc + (perArticleMetrics[a.id]?.citations || 0);
-  }, 0);
 
   let bookmarksCount = 0;
   let peerAnnotationsCount = 0;
@@ -279,16 +272,8 @@ export async function compileContributorStats(
       }
     });
   } catch (e) {
-    // If permission or network fails, provide sensible calculation based on views
-    bookmarksCount = Math.max(4, Math.floor(totalViews * 0.05));
+    console.warn('Bookmarks collection unavailable:', e);
   }
-
-  // Ensure every article has at least a realistic bookmark baseline if overall counts are low
-  authorArticles.forEach(a => {
-    if (perArticleMetrics[a.id] && perArticleMetrics[a.id].bookmarks === 0) {
-      perArticleMetrics[a.id].bookmarks = Math.max(1, Math.floor((a.views || 0) * 0.04));
-    }
-  });
 
   // 2. Query Peer Annotations / Marginalia
   try {
@@ -304,14 +289,13 @@ export async function compileContributorStats(
       }
     });
   } catch (e) {
-    peerAnnotationsCount = Math.max(3, Math.floor(totalViews * 0.03));
+    console.warn('Peer annotations collection unavailable:', e);
   }
 
-  authorArticles.forEach(a => {
-    if (perArticleMetrics[a.id] && perArticleMetrics[a.id].annotations === 0) {
-      perArticleMetrics[a.id].annotations = Math.max(1, Math.floor((a.views || 0) * 0.02));
-    }
-  });
+  // Total citations count from actual article metadata references
+  const totalCitationsGenerated = authorArticles.reduce((acc, a) => {
+    return acc + (perArticleMetrics[a.id]?.citations || 0);
+  }, 0);
 
   // 3. Query Draft Internal Notes for Author's Articles
   const allNotes = await fetchDraftNotes();

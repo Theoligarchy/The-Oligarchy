@@ -43,7 +43,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   copyrightText: 'The Oligarchy · All Rights Reserved.',
   disclaimerText: 'Published for academic, investigative, and educational purposes under critical fair inquiry doctrines.',
 
-  defaultSeoTitle: 'The Oligarchy | Journal of Critical Inquiry & Power Systems',
+  defaultSeoTitle: 'The Oligarchy : Independent Publication',
   defaultSeoDescription: 'Independent research platform exploring crime, psychology, politics, and systems of power.',
   defaultOgImage: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?q=80&w=1200&auto=format&fit=crop'
 };
