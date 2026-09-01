@@ -32,8 +32,8 @@ export function getArticleAuthors(article: Article): { name: string; role?: stri
   if (article.authorName && article.authorName.trim()) {
     list.push({
       name: article.authorName.trim(),
-      role: article.authorTitle || (article.authorId === 'priyasha-priyal-jena' ? 'Founder & Editor-in-Chief' : 'Lead Investigator'),
-      institution: article.authorInstitution || 'The Oligarchy Research Group',
+      role: article.authorTitle || (article.authorId === 'priyasha-priyal-jena' ? 'Founder & Editor-in-Chief' : undefined),
+      institution: article.authorInstitution || undefined,
       orcid: article.authorOrcid
     });
   }
@@ -44,8 +44,8 @@ export function getArticleAuthors(article: Article): { name: string; role?: stri
       if (ca.name && ca.name.trim()) {
         list.push({
           name: ca.name.trim(),
-          role: ca.role || 'Co-Researcher',
-          institution: ca.institution,
+          role: ca.role || undefined,
+          institution: ca.institution || undefined,
           orcid: ca.orcid
         });
       }
@@ -55,8 +55,7 @@ export function getArticleAuthors(article: Article): { name: string; role?: stri
   if (list.length === 0) {
     list.push({
       name: 'Priyasha Priyal Jena',
-      role: 'Founder & Editor-in-Chief',
-      institution: 'The Oligarchy Research Group'
+      role: 'Founder & Editor-in-Chief'
     });
   }
 

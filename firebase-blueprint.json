@@ -162,9 +162,27 @@
         "savedAt": { "type": "number", "description": "Bookmark timestamp" }
       },
       "required": ["id", "readerId", "articleId", "savedAt"]
+    },
+    "SiteSettings": {
+      "title": "SiteSettings",
+      "description": "Global publication editorial guidelines, masthead metadata, and social media channels.",
+      "type": "object",
+      "properties": {
+        "siteName": { "type": "string", "description": "Publication display name" },
+        "tagline": { "type": "string", "description": "Publication motto" },
+        "aboutText": { "type": "string", "description": "About section editorial statement" },
+        "peerReviewPolicy": { "type": "string", "description": "Peer review standards and methodology" },
+        "socials": { "type": "object", "description": "Social media links" },
+        "updatedAt": { "type": "number", "description": "Last update timestamp" }
+      },
+      "required": ["siteName", "tagline", "aboutText"]
     }
   },
   "firestore": {
+    "/settings/{settingId}": {
+      "schema": "SiteSettings",
+      "description": "Global publication configuration and editorial policies."
+    },
     "/articles/{articleId}": {
       "schema": "Article",
       "description": "Published and draft scholarly articles, monographs, and research analyses."

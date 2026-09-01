@@ -75,6 +75,7 @@ import {
 import MarginaliaPanel from './components/MarginaliaPanel';
 import FloatingShareMenu from './components/FloatingShareMenu';
 import FootnotePopover, { ActiveFootnoteState } from './components/FootnotePopover';
+import AuthorBioCard from './components/AuthorBioCard';
 import { transformFootnotesInHtml } from './utils/footnoteTransformer';
 import { compileScholarlyPDF } from './utils/pdfCompiler';
 
@@ -1857,19 +1858,17 @@ export default function App() {
                 </div>
               )}
 
-              {/* Mini Author bio card inside post design */}
-              <div className="bg-navy border border-paper/10 p-6 rounded-sm mt-8 flex flex-col sm:flex-row gap-5 items-center sm:items-start select-text shadow-lg">
-                <div className="w-12 h-12 bg-blood text-paper flex items-center justify-center font-display text-xl font-bold rounded-full border border-paper/10 shrink-0 select-none">
-                  P
-                </div>
-                <div className="text-center sm:text-left flex flex-col gap-1.5">
-                  <h3 className="font-display text-base font-bold text-paper/90 leading-none">Priyasha Priyal Jena</h3>
-                  <p className="font-sans text-[9px] font-semibold uppercase tracking-wider text-blood">Founder &amp; Editor-in-Chief</p>
-                  <p className="font-serif text-xs text-paper/40 leading-relaxed">
-                    Student researcher focusing on criminology, institutional politics, behavior patterns, and forensic studies. Currently studying business while maintaining The Oligarchy as a long-term research registry.
-                  </p>
-                </div>
-              </div>
+              {/* Scholarly Author Bio Card & More By This Author Section */}
+              <AuthorBioCard
+                currentArticle={selectedArticle}
+                allArticles={articles}
+                contributors={contributors}
+                onSelectArticle={handleArticleClick}
+                onSelectContributor={(contributorIdOrName) => {
+                  setSelectedContributorId(contributorIdOrName);
+                  setActiveTab('contributors');
+                }}
+              />
 
             </article>
           </div>

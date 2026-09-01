@@ -265,7 +265,7 @@ export default function CitationGenerator({ article, onAuthorClick }: CitationGe
                     ({auth.role})
                   </span>
                 )}
-                {orcidUrl ? (
+                {orcidUrl && (
                   <a
                     href={orcidUrl}
                     target="_blank"
@@ -279,8 +279,6 @@ export default function CitationGenerator({ article, onAuthorClick }: CitationGe
                     <span>ORCID</span>
                     <ExternalLink size={9} />
                   </a>
-                ) : (
-                  <span className="font-mono text-[8px] text-paper/30 ml-0.5">TOL Verified</span>
                 )}
               </div>
             );

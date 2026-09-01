@@ -504,7 +504,7 @@ export default function SiteContentManager({ allArticles, onSettingsUpdated }: S
                 type="text"
                 value={settings.socials.instagram}
                 onChange={(e) => handleSocialChange('instagram', e.target.value)}
-                placeholder="https://instagram.com/the.oligarchy"
+                placeholder="https://www.instagram.com/theoligarchy.in"
                 className="bg-midnight border border-paper/10 rounded-sm py-2 px-3 text-paper font-mono text-xs"
               />
             </div>

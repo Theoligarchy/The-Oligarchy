@@ -445,10 +445,7 @@ export default function ContributorDashboard({
 THE OLIGARCHY — SCHOLARLY IMPACT DOSSIER
 =====================================================
 Researcher: ${activeResearcher.name}
-Role: ${activeResearcher.role || 'Contributor'}
-Institution: ${activeResearcher.institution || 'The Oligarchy'}
-ORCID: ${activeResearcher.orcid || 'Unregistered'}
-Verified Email: ${authorEmail}
+${activeResearcher.isFounder ? 'Role: Founder & Editor-in-Chief\n' : (activeResearcher.role ? `Role: ${activeResearcher.role}\n` : '')}${activeResearcher.institution ? `Institution: ${activeResearcher.institution}\n` : ''}${activeResearcher.orcid ? `ORCID: ${activeResearcher.orcid}\n` : ''}Verified Email: ${authorEmail}
 Date Generated: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
 
 AGGREGATED RESEARCH IMPACT METRICS
@@ -469,8 +466,7 @@ ${authorArticles.map((art, idx) => {
    • Citations: ${m.citations}
    • Reader Bookmarks: ${m.bookmarks}
    • Marginalia Annotations: ${m.annotations}
-   • Permanent DOI: ${art.doi || '10.5281/zenodo.10892341'}
-`;
+${art.doi ? `   • Permanent DOI: ${art.doi}\n` : ''}`;
 }).join('\n')}
 =====================================================
 The Oligarchy Journal of Criminology, Psyche & Politics
@@ -557,10 +553,12 @@ https://theoligarchy.in
 
           <div className="flex flex-col">
             <div className="flex flex-wrap items-center gap-2 mb-1.5">
-              <span className="font-sans text-[8px] font-bold uppercase tracking-widest px-2.5 py-0.5 rounded-xs border bg-blood/10 text-paper border-blood/30 flex items-center gap-1">
-                <ShieldCheck size={10} className="text-blood-light" />
-                {activeResearcher.isFounder ? 'Founding Editor & Senior Fellow' : activeResearcher.role || 'Guest Researcher'}
-              </span>
+              {(activeResearcher.isFounder || activeResearcher.role) && (
+                <span className="font-sans text-[8px] font-bold uppercase tracking-widest px-2.5 py-0.5 rounded-xs border bg-blood/10 text-paper border-blood/30 flex items-center gap-1">
+                  <ShieldCheck size={10} className="text-blood-light" />
+                  {activeResearcher.isFounder ? 'Founding Editor & Senior Fellow' : activeResearcher.role}
+                </span>
+              )}
 
               {activeResearcher.orcid && (
                 <a
@@ -581,10 +579,18 @@ https://theoligarchy.in
             </h2>
             
             <p className="font-serif text-xs lg:text-sm text-paper/70 mt-1 flex flex-wrap items-center gap-2">
-              <span>{activeResearcher.institution || 'Centre for Critical Forensic Inquiry'}</span>
-              <span>•</span>
-              <span className="text-paper/50">{activeResearcher.credentials || 'Senior Research Fellow'}</span>
-              <span>•</span>
+              {activeResearcher.institution && (
+                <>
+                  <span>{activeResearcher.institution}</span>
+                  <span>•</span>
+                </>
+              )}
+              {activeResearcher.credentials && (
+                <>
+                  <span className="text-paper/50">{activeResearcher.credentials}</span>
+                  <span>•</span>
+                </>
+              )}
               <span className="text-paper/40 font-mono text-[11px]">{authorEmail}</span>
             </p>
 
@@ -1644,8 +1650,12 @@ https://theoligarchy.in
                               <span className="capitalize text-blood-light font-semibold">{art.category}</span>
                               <span>•</span>
                               <span>Published {art.publishDate || new Date(art.createdAt).toLocaleDateString('en-GB')}</span>
-                              <span>•</span>
-                              <span className="font-mono text-[8px]">DOI: {art.doi || '10.5281/tol.892'}</span>
+                              {art.doi && (
+                                <>
+                                  <span>•</span>
+                                  <span className="font-mono text-[8px]">DOI: {art.doi}</span>
+                                </>
+                              )}
                             </div>
                           </td>
 
@@ -2239,7 +2249,9 @@ https://theoligarchy.in
                         <Quote size={12} className="text-blood-light" />
                         Academic Citation Formats
                       </span>
-                      <span className="font-mono text-[9px] text-paper/40">DOI: {selectedPaperForMetrics.doi || '10.5281/zenodo.10892341'}</span>
+                      {selectedPaperForMetrics.doi && (
+                        <span className="font-mono text-[9px] text-paper/40">DOI: {selectedPaperForMetrics.doi}</span>
+                      )}
                     </div>
 
                     {/* Formats list */}

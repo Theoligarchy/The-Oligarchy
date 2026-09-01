@@ -31,7 +31,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   peerReviewPolicy: 'Every investigative dossier undergoes double-blind editorial review, source cross-verification, and legal fact-checking prior to archival publication.',
 
   socials: {
-    instagram: 'https://instagram.com/the.oligarchy',
+    instagram: 'https://www.instagram.com/theoligarchy.in?igsh=bjV4ZGhpdnJxbjV4',
     twitter: 'https://x.com/the_oligarchy',
     linkedinPersonal: 'https://www.linkedin.com/in/priyasha-priyal-jena/',
     linkedinCompany: 'https://www.linkedin.com/company/the-oligarchy-ppj/',

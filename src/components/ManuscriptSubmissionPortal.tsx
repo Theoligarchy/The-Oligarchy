@@ -639,7 +639,7 @@ The Oligarchy · https://theoligarchy.in
               </label>
               <input
                 type="text"
-                placeholder="e.g. Dr. Arthur Vance (Sorbonne), Elena Rostova (UCL)"
+                placeholder="e.g. Co-Author Name (Affiliated Institution)"
                 value={coAuthors}
                 onChange={(e) => setCoAuthors(e.target.value)}
                 className="w-full bg-ink border border-paper/15 focus:border-blood focus:outline-none py-2.5 px-3 text-paper font-serif text-sm rounded-xs transition-colors"

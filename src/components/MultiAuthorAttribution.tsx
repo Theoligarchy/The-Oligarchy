@@ -118,6 +118,10 @@ export default function MultiAuthorAttribution({
   // ══════════════════════════════════════════════════════════════════════════
   // FOOTER COMPREHENSIVE CONTRIBUTORSHIP & RESEARCH TEAM BREAKDOWN
   // ══════════════════════════════════════════════════════════════════════════
+  if (!isMultiAuthor) {
+    return null;
+  }
+
   return (
     <div className="border border-paper/10 bg-[#090909] rounded-sm p-6 sm:p-7 shadow-lg my-8 select-text">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-paper/10 pb-4 mb-6">
@@ -150,7 +154,7 @@ export default function MultiAuthorAttribution({
 
           return (
             <div 
-              key={idx}
+              key={idx} 
               className="border border-paper/10 rounded-sm bg-navy/40 p-5 flex flex-col justify-between hover:border-blood/40 transition-colors"
             >
               <div>
@@ -167,10 +171,10 @@ export default function MultiAuthorAttribution({
                         {author.name}
                       </button>
                       <div className="font-sans text-[9px] font-bold uppercase tracking-wider text-blood-light flex items-center gap-1.5 mt-0.5">
-                        <span>{author.role || (isPrimary ? 'Lead Author & Investigator' : 'Co-Researcher')}</span>
+                        {author.role && <span>{author.role}</span>}
                         {isPrimary && (
                           <span className="bg-blood/20 text-red-300 px-1.5 py-0.2 rounded-xs text-[8px]">
-                            Primary
+                            Primary Author
                           </span>
                         )}
                       </div>
