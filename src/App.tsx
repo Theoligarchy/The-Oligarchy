@@ -197,8 +197,8 @@ export default function App() {
 
   // Synchronize SEO & Open Graph / Twitter Meta Tags dynamically in browser
   useEffect(() => {
-    let title = "The Oligarchy : Independent Publication";
-    let desc = "Independent research platform exploring crime, human behaviour, and systems of power. The Oligarchy : Independent Publication";
+    let title = "THE OLIGARCHY : INDEPENDENT PUBLICATION";
+    let desc = "Independent research platform exploring crime, human behaviour, and systems of power. THE OLIGARCHY : INDEPENDENT PUBLICATION";
     let image = "https://theoligarchy.in/logo_highres.png";
     let url = "https://theoligarchy.in";
 

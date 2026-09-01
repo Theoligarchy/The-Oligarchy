@@ -1,12 +1,24 @@
 {
   "short_name": "The Oligarchy",
-  "name": "The Oligarchy : Independent Publication",
+  "name": "THE OLIGARCHY : INDEPENDENT PUBLICATION",
   "description": "An independent peer-reviewed and scholarly archive dedicated to investigating criminology, criminal psychology, and political power systems.",
   "icons": [
     {
       "src": "/favicon-192x192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon-512x512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180"
     },
     {
       "src": "/favicon-144x144.png",
@@ -14,7 +26,7 @@
       "sizes": "144x144"
     },
     {
-      "src": "/logo_highres.png",
+      "src": "/favicon.png",
       "type": "image/png",
       "sizes": "512x512"
     }
