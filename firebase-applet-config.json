@@ -1,10 +1,10 @@
 {
-  "projectId": "balmy-framing-jj1d7",
-  "appId": "1:214639932128:web:eac4df8af286d485129685",
-  "apiKey": "AIzaSyAsbdYOc7qhoaOauFUi5qiELvxKHgFICjg",
-  "authDomain": "balmy-framing-jj1d7.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-theoligarchy-56998575-a2c5-4cbc-8cbc-dd66e1c68ca1",
-  "storageBucket": "balmy-framing-jj1d7.firebasestorage.app",
-  "messagingSenderId": "214639932128",
-  "measurementId": ""
+  "projectId": "the-oligarchy-a58f7",
+  "appId": "1:725865177576:web:9322a75ba198940767c45d",
+  "apiKey": "AIzaSyDYtbwcqj4aTIk9pHx-32j2Jz9iriC6opQ",
+  "authDomain": "the-oligarchy-a58f7.firebaseapp.com",
+  "firestoreDatabaseId": "default",
+  "storageBucket": "the-oligarchy-a58f7.firebasestorage.app",
+  "messagingSenderId": "725865177576",
+  "measurementId": "G-DMDFRC6BTL"
 }

@@ -2,53 +2,57 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Check if the user is authenticated as an administrator or editorial member
+    // Check if the user is authenticated
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isAdmin() {
-      return isAuthenticated() && (
-        request.auth.token.email == 'theoligarchy.ppj@gmail.com' ||
-        request.auth.token.email.matches('.*@theoligarchy[.]in') ||
-        true // Permissive fallback for preview environment
-      );
+    // Strictly enforce that only the designated administrator has admin privileges
+    // Instead of relying on a generic auth object, verify the token email against the specific authorized address
+    function isDesignatedAdmin() {
+      return isAuthenticated() && 
+             request.auth.token.email != null &&
+             (request.auth.token.email == 'theoligarchy.ppj@gmail.com' || request.auth.token.email.lower() == 'theoligarchy.ppj@gmail.com');
+    }
+
+    // Users Collection - Strict restriction to prevent public user registration
+    match /users/{userId} {
+      allow read: if isDesignatedAdmin();
+      allow write: if false; // No public registration or user creation is possible
     }
 
     // Site Settings & Global Configuration
     match /settings/{settingId} {
       allow read: if true; // Public can fetch site configuration, masthead, and socials
-      allow write: if isAuthenticated() || isAdmin() || true;
+      allow write: if isDesignatedAdmin();
     }
 
     // Editorial Team Registry & Scholar Profiles
     match /editorial_team/{memberId} {
       allow read: if true; // Public can view editorial board profiles & bylines
-      allow write: if isAuthenticated() || isAdmin() || true;
+      allow write: if isDesignatedAdmin();
     }
 
     // Contributors Collection
     match /contributors/{contributorId} {
       allow read: if true; // Public can view scholar contributors
-      allow write: if isAuthenticated() || isAdmin() || true;
+      allow write: if isDesignatedAdmin();
     }
 
     // Articles Rules
     match /articles/{articleId} {
       // Allow public readers to read articles
       allow read: if true;
-      // Allow view increments publicly, allow authors to edit their own drafts, allow admins to publish/edit all
-      allow update: if (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views'])) || isAuthenticated() || isAdmin() || true;
-      // Authenticated researchers and admins can create articles, allow seeding
-      allow create: if isAuthenticated() || isAdmin() || true;
-      // Allow deletion by admins/authors
-      allow delete: if isAuthenticated() || isAdmin() || true;
+      // Allow view increments publicly; administrative updates restricted to designated admin
+      allow update: if (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views'])) || isDesignatedAdmin();
+      // Only designated admin can create or delete articles
+      allow create, delete: if isDesignatedAdmin();
     }
 
     // Reading Stack Rules
     match /reading/{itemId} {
       allow read: if true;
-      allow write, delete: if isAuthenticated() || isAdmin() || true;
+      allow write, delete: if isDesignatedAdmin();
     }
 
     // User Saved Articles (Personal Reading Lists by readerId or auth)
@@ -63,54 +67,59 @@ service cloud.firestore {
     // Newsletter Subscribers
     match /subscribers/{subscriberId} {
       allow create, read: if true; // Public can subscribe & verify
-      allow update, delete: if isAuthenticated() || isAdmin() || true;
+      allow update, delete: if isDesignatedAdmin();
     }
 
     // Analytics Views Logs
     match /views_log/{viewId} {
-      allow create: if true; // Public can log views
+      allow create, update: if true; // Public can log views and update reading duration / scroll depth
       allow read: if true; // Authors & contributors can fetch telemetry
-      allow update, delete: if isAuthenticated() || isAdmin() || true;
+      allow delete: if isDesignatedAdmin();
+    }
+
+    // Active Reader Sessions (Live Presence Heartbeat)
+    match /active_sessions/{sessionId} {
+      allow read, write, delete: if true;
     }
 
     // Peer Reviews / Marginalia / Debate Portal
     match /peer_reviews/{reviewId} {
       allow read, create: if true; // Public can read and submit peer annotations
-      allow update: if true;
-      allow delete: if isAuthenticated() || isAdmin() || true;
+      allow update, delete: if isDesignatedAdmin();
     }
 
     // Peer Annotations
     match /peer_annotations/{annotationId} {
-      allow read, create, update, delete: if true;
+      allow read, create: if true;
+      allow update, delete: if isDesignatedAdmin();
     }
 
     // Draft Internal Revision Notes
     match /draft_notes/{noteId} {
-      allow read, write, delete: if true;
+      allow read, write, delete: if isDesignatedAdmin();
     }
 
     // Research Tips
     match /tips/{tipId} {
-      allow create, read: if true; // Public can submit tips
-      allow update, delete: if isAuthenticated() || isAdmin() || true;
+      allow create: if true; // Public can submit confidential tips
+      allow read, update, delete: if isDesignatedAdmin();
     }
 
     // Manuscript Submissions & Investigation Pitches
     match /submissions/{submissionId} {
-      allow create, read: if true; // Public researchers can submit manuscripts
-      allow update, delete: if isAuthenticated() || isAdmin() || true;
+      allow create: if true; // Public researchers can submit manuscripts
+      allow read, update, delete: if isDesignatedAdmin();
     }
 
     // System Metadata
     match /system_meta/{metaId} {
-      allow read: if true;
-      allow write: if isAuthenticated() || isAdmin() || true;
+      allow read, write: if isDesignatedAdmin();
     }
 
     // General fallback block
     match /{document=**} {
-      allow read, write: if isAuthenticated() || isAdmin() || true;
+      allow read: if true;
+      allow write: if isDesignatedAdmin();
     }
   }
 }

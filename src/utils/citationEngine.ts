@@ -68,8 +68,9 @@ export function getArticleAuthors(article: Article): { name: string; role?: stri
 function getArticleDateComponents(article: Article): { year: number; monthName: string; monthShort: string; day: number; formattedFull: string } {
   let dateObj = new Date(article.createdAt || Date.now());
 
-  if (article.publishDate) {
-    const parsed = new Date(article.publishDate);
+  const rawDate = article.originalPublishedAt || article.publishDate;
+  if (rawDate) {
+    const parsed = new Date(rawDate);
     if (!isNaN(parsed.getTime())) {
       dateObj = parsed;
     }

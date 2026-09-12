@@ -61,7 +61,7 @@ export default function ArticleCard({ article, onClick, isSaved = false, onToggl
           <div className="flex items-center gap-2">
             <span className="font-sans text-[10px] text-paper/30 flex items-center gap-1">
               <Calendar size={11} />
-              {article.publishDate || new Date(article.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+              {article.originalPublishedAt || article.publishDate || (article.createdAt ? new Date(article.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'No data available')}
             </span>
 
             {onToggleSave && (

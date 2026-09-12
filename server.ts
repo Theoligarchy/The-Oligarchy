@@ -83,8 +83,19 @@ async function getArticleByIdOrSlug(idOrSlug: string): Promise<ArticleData | nul
     // ignore
   }
 
-  const projectId = "balmy-framing-jj1d7";
-  const databaseId = "ai-studio-theoligarchy-56998575-a2c5-4cbc-8cbc-dd66e1c68ca1";
+  let projectId = "the-oligarchy-a58f7";
+  let databaseId = "default";
+  let apiKey = "";
+  try {
+    const configRaw = fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8');
+    const parsed = JSON.parse(configRaw);
+    if (parsed.projectId) projectId = parsed.projectId;
+    if (parsed.firestoreDatabaseId) databaseId = parsed.firestoreDatabaseId;
+    if (parsed.apiKey) apiKey = parsed.apiKey;
+  } catch (e) {
+    // fallback
+  }
+  const keyParam = apiKey ? `?key=${apiKey}` : '';
   const baseUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents`;
 
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').trim();
@@ -92,7 +103,7 @@ async function getArticleByIdOrSlug(idOrSlug: string): Promise<ArticleData | nul
 
   // 1. Try fetching directly by ID
   try {
-    const res = await fetch(`${baseUrl}/articles/${encodeURIComponent(decoded)}`);
+    const res = await fetch(`${baseUrl}/articles/${encodeURIComponent(decoded)}${keyParam}`);
     if (res.ok) {
       const doc = await res.json();
       const art = parseFirestoreDoc(doc);
@@ -104,7 +115,7 @@ async function getArticleByIdOrSlug(idOrSlug: string): Promise<ArticleData | nul
 
   // 2. Try querying by slug field directly
   try {
-    const queryUrl = `${baseUrl}:runQuery`;
+    const queryUrl = `${baseUrl}:runQuery${keyParam}`;
     const response = await fetch(queryUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -136,7 +147,7 @@ async function getArticleByIdOrSlug(idOrSlug: string): Promise<ArticleData | nul
 
   // 3. Fallback: Query and find match using robust normalization of slug or title
   try {
-    const queryUrl = `${baseUrl}:runQuery`;
+    const queryUrl = `${baseUrl}:runQuery${keyParam}`;
     const response = await fetch(queryUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

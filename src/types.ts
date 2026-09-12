@@ -47,7 +47,8 @@ export interface Article {
   excerpt: string;
   content: string; // HTML content from Quill
   status: 'draft' | 'published' | 'scheduled' | 'archived';
-  publishDate?: string; // ISO date or localized text
+  originalPublishedAt?: string; // Immutable historical first publication date (e.g. "6 July 2026"). Never altered by edits or status toggles.
+  publishDate?: string; // Historical date string kept in sync with originalPublishedAt for backwards compatibility
   scheduledAt?: number; // timestamp for scheduling
   createdAt: number;
   updatedAt: number;

@@ -116,7 +116,7 @@ export default function FeaturedResearch({
 
         {/* Banner footer views and timing */}
         <div className="flex gap-6 items-center border-t border-paper/10 pt-4 mt-2 font-sans text-[10px] text-paper/30">
-          <span>Published: {article.publishDate || new Date(article.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}</span>
+          <span>Published: {article.originalPublishedAt || article.publishDate || (article.createdAt ? new Date(article.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'No data available')}</span>
           <span className="flex items-center gap-1"><Eye size={12} /> {article.views || 0} views</span>
           <span className="flex items-center gap-1"><Clock size={12} /> {article.readTime || '15 min read'}</span>
         </div>

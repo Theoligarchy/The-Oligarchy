@@ -49,7 +49,7 @@ function parseFirestoreDoc(doc) {
     featuredImage: parseFirestoreValue(fields.featuredImage) || '',
     seoTitle: parseFirestoreValue(fields.seoTitle) || '',
     seoDescription: parseFirestoreValue(fields.seoDescription) || '',
-    date: parseFirestoreValue(fields.date) || parseFirestoreValue(fields.publishedAt) || '',
+    date: parseFirestoreValue(fields.originalPublishedAt) || parseFirestoreValue(fields.publishDate) || parseFirestoreValue(fields.date) || parseFirestoreValue(fields.publishedAt) || '',
     author: parseFirestoreValue(fields.author) || 'Priyasha Priyal Jena',
     category: parseFirestoreValue(fields.category) || 'Criminology'
   };

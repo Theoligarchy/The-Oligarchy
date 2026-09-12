@@ -10,6 +10,7 @@ import {
   addDoc, updateDoc, doc, arrayUnion, increment 
 } from 'firebase/firestore';
 import { PeerAnnotation, PeerReply } from '../types';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 
 interface MarginaliaPanelProps {
   isOpen: boolean;
@@ -110,7 +111,7 @@ export default function MarginaliaPanel({
         replies: []
       };
 
-      await addDoc(reviewsRef, newAnnotation);
+      await addDoc(reviewsRef, sanitizeFirestoreData(newAnnotation));
       
       // Reset form
       setContent('');

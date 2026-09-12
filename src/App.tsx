@@ -89,6 +89,9 @@ const logViewEntry = async (art: Article) => {
   }
 };
 
+// Sole designated administrator email address for The Oligarchy
+const AUTHORIZED_ADMIN_EMAIL = 'theoligarchy.ppj@gmail.com';
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('home');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -109,6 +112,15 @@ export default function App() {
   const [savedArticles, setSavedArticles] = useState<SavedArticle[]>([]);
   const [contributors, setContributors] = useState<AuthorProfile[]>([]);
   const [adminUser, setAdminUser] = useState<User | null>(null);
+
+  // Strict administrator authorization: verify user.email against the authorized email address
+  // rather than relying merely on the existence of a Firebase User object
+  const isAuthorizedAdmin = Boolean(
+    adminUser &&
+    adminUser.email &&
+    adminUser.email.toLowerCase().trim() === AUTHORIZED_ADMIN_EMAIL.toLowerCase()
+  );
+
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => getCachedSiteSettings());
 
 
@@ -464,22 +476,24 @@ export default function App() {
   useEffect(() => {
     loadData();
 
-    // Track active authentication session state
+    // Track active authentication session state strictly for designated administrator.
+    // Instead of relying on the Firebase User object, verify user.email against the authorized email address.
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      // Purge any legacy local sessions
+      localStorage.removeItem('local_admin_session');
+
       if (user) {
-        setAdminUser(user);
-      } else {
-        const localSession = localStorage.getItem('local_admin_session');
-        if (localSession) {
-          try {
-            setAdminUser(JSON.parse(localSession));
-          } catch (e) {
-            localStorage.removeItem('local_admin_session');
-            setAdminUser(null);
-          }
+        const email = user.email ? user.email.toLowerCase().trim() : '';
+        if (email === AUTHORIZED_ADMIN_EMAIL.toLowerCase()) {
+          setAdminUser(user);
         } else {
+          // Explicitly reject any account whose email does not match the designated address
+          console.warn(`Unauthorized login attempt detected for ${user.email}. Revoking session.`);
+          auth.signOut().catch(console.error);
           setAdminUser(null);
         }
+      } else {
+        setAdminUser(null);
       }
     });
 
@@ -792,10 +806,11 @@ export default function App() {
       }
     }
 
-    // Helper for robust article timestamp resolution (publishDate parsed or fallback to createdAt)
+    // Helper for robust article timestamp resolution (originalPublishedAt/publishDate parsed or fallback to createdAt)
     const getArticleTimestamp = (art: Article): number => {
-      if (art.publishDate) {
-        const parsed = Date.parse(art.publishDate);
+      const dateStr = art.originalPublishedAt || art.publishDate;
+      if (dateStr) {
+        const parsed = Date.parse(dateStr);
         if (!isNaN(parsed)) return parsed;
       }
       return art.createdAt || 0;
@@ -1455,14 +1470,14 @@ export default function App() {
         {(activeTab === 'contributor-dashboard' || activeTab === 'contributor-hub') && (
           <div className="py-8 md:py-12 px-4 md:px-8 max-w-7xl mx-auto">
             <ContributorDashboard 
-              currentUser={adminUser ? {
+              currentUser={isAuthorizedAdmin && adminUser ? {
                 uid: adminUser.uid,
-                email: adminUser.email || 'theoligarchy.ppj@gmail.com',
+                email: adminUser.email || AUTHORIZED_ADMIN_EMAIL,
                 displayName: adminUser.displayName || 'Priyasha Priyal Jena',
                 role: 'admin',
                 authorId: 'priyasha-priyal-jena'
               } : null}
-              currentUserRole={adminUser ? 'admin' : 'author'}
+              currentUserRole={isAuthorizedAdmin ? 'admin' : 'author'}
               articles={articles}
               contributors={contributors}
               initialContributorId={dashboardContributorId}
@@ -1512,9 +1527,12 @@ export default function App() {
         {/* ══ VIEW: SECURE EDITORIAL PANEL (ADMIN) ══ */}
         {activeTab === 'admin' && (
           <div className="fade-in">
-            {adminUser ? (
+            {isAuthorizedAdmin ? (
               <AdminDashboard 
-                onLogout={() => setAdminUser(null)} 
+                onLogout={() => {
+                  auth.signOut().catch(console.error);
+                  setAdminUser(null);
+                }} 
                 allArticles={articles}
                 refreshArticles={loadData}
               />
@@ -1528,7 +1546,17 @@ export default function App() {
                     &larr; Back to Public Platform
                   </button>
                 </div>
-                <AdminLogin onLoginSuccess={(user) => setAdminUser(user)} />
+                <AdminLogin 
+                  onLoginSuccess={(user) => {
+                    if (user && user.email && user.email.toLowerCase().trim() === AUTHORIZED_ADMIN_EMAIL.toLowerCase()) {
+                      setAdminUser(user);
+                    } else {
+                      console.warn(`Unauthorized login attempt by: ${user?.email}. Rejecting.`);
+                      auth.signOut().catch(console.error);
+                      setAdminUser(null);
+                    }
+                  }} 
+                />
               </div>
             )}
           </div>
@@ -1593,8 +1621,17 @@ export default function App() {
                 <span className="font-sans text-[10px] text-paper/20">•</span>
                 <span className="font-sans text-[10px] text-paper/30 flex items-center gap-1">
                   <Calendar size={11} />
-                  {selectedArticle.publishDate || new Date(selectedArticle.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                  Published {selectedArticle.originalPublishedAt || selectedArticle.publishDate || (selectedArticle.createdAt ? new Date(selectedArticle.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'No data available')}
                 </span>
+                {selectedArticle.updatedAt && (
+                  <>
+                    <span className="font-sans text-[10px] text-paper/20">•</span>
+                    <span className="font-sans text-[10px] text-paper/30 flex items-center gap-1">
+                      <Clock size={11} />
+                      Updated {new Date(selectedArticle.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    </span>
+                  </>
+                )}
                 
                 <span className="font-sans text-[10px] text-paper/20">•</span>
                 <span className="font-sans text-[10px] text-paper/30 flex items-center gap-1"><Eye size={12} /> {selectedArticle.views || 0} hits</span>

@@ -2,11 +2,11 @@ import { Article } from '../types';
 
 export const compileScholarlyPDF = (article: Article) => {
   // Format dates for metadata
-  const publishDateStr = article.publishDate || new Date(article.createdAt || Date.now()).toLocaleDateString('en-GB', {
+  const publishDateStr = article.originalPublishedAt || article.publishDate || (article.createdAt ? new Date(article.createdAt).toLocaleDateString('en-GB', {
     day: 'numeric',
     month: 'long',
     year: 'numeric'
-  });
+  }) : 'No data available');
 
   // Parse category for proper capitalisation
   const categoryStr = article.category.toUpperCase();

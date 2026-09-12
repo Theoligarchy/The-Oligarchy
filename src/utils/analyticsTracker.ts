@@ -13,6 +13,7 @@ import {
   Unsubscribe
 } from 'firebase/firestore';
 import { Article } from '../types';
+import { sanitizeFirestoreData } from './firestoreSanitizer';
 
 // Storage keys
 const VISITOR_ID_KEY = 'tol_visitor_id';
@@ -146,7 +147,7 @@ export async function trackPageView(
   currentSessionStartTime = now;
   maxScrollDepth = 0;
 
-  const viewData = {
+  const viewData: Record<string, any> = {
     articleId: article ? article.id : `page-${page}`,
     articleTitle: article ? article.title : `Page: ${page.charAt(0).toUpperCase() + page.slice(1)}`,
     category: article?.category || 'general',
@@ -156,32 +157,39 @@ export async function trackPageView(
     isReturning,
     deviceType,
     browser,
-    userAgent: navigator.userAgent,
-    referrer: document.referrer || 'direct',
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+    referrer: typeof document !== 'undefined' ? (document.referrer || 'direct') : 'direct',
     readDurationSeconds: 0,
-    scrollDepthPercent: 0,
-    authorId: article?.authorId || undefined,
-    authorEmail: article?.createdByEmail || undefined
+    scrollDepthPercent: 0
   };
+
+  if (article?.authorId) {
+    viewData.authorId = article.authorId;
+  }
+  if (article?.createdByEmail) {
+    viewData.authorEmail = article.createdByEmail;
+  }
 
   try {
     const colRef = collection(db, 'views_log');
-    const docRef = await addDoc(colRef, viewData);
+    const docRef = await addDoc(colRef, sanitizeFirestoreData(viewData));
     currentViewDocId = docRef.id;
 
     // Start active reader heartbeat
-    startActiveHeartbeat({
+    const sessionPayload: ActiveSessionRecord = {
       sessionId,
       visitorId,
       page,
-      articleId: article?.id,
-      articleTitle: article?.title,
       startedAt: now,
       lastActive: now,
       deviceType,
       browser,
-      referrer: document.referrer || 'direct'
-    });
+      referrer: typeof document !== 'undefined' ? (document.referrer || 'direct') : 'direct'
+    };
+    if (article?.id) sessionPayload.articleId = article.id;
+    if (article?.title) sessionPayload.articleTitle = article.title;
+
+    startActiveHeartbeat(sessionPayload);
 
     return docRef.id;
   } catch (err) {
@@ -210,20 +218,20 @@ export function startActiveHeartbeat(session: ActiveSessionRecord) {
     try {
       // 1. Update active session doc
       const sessionDocRef = doc(db, 'active_sessions', session.sessionId);
-      await setDoc(sessionDocRef, {
+      await setDoc(sessionDocRef, sanitizeFirestoreData({
         ...session,
         lastActive: Date.now(),
         readDurationSeconds: elapsedSeconds,
         scrollDepthPercent: maxScrollDepth
-      }, { merge: true });
+      }), { merge: true });
 
       // 2. Incrementally update read duration on the view log doc
       if (currentViewDocId) {
         const viewDocRef = doc(db, 'views_log', currentViewDocId);
-        await updateDoc(viewDocRef, {
+        await updateDoc(viewDocRef, sanitizeFirestoreData({
           readDurationSeconds: elapsedSeconds,
           scrollDepthPercent: maxScrollDepth
-        });
+        }));
       }
     } catch {
       // Silent catch for network drops

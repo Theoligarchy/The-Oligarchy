@@ -3,6 +3,7 @@ import { db, auth, fetchFullArticle } from '../firebase';
 import { 
   collection, 
   getDocs, 
+  getDoc,
   doc, 
   setDoc, 
   updateDoc, 
@@ -11,7 +12,7 @@ import {
   orderBy, 
   query 
 } from 'firebase/firestore';
-import { signOut, updatePassword } from 'firebase/auth';
+import { signOut, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { Article, ReadingItem, ResearchTip, ArticleVersion, PeerAnnotation, ManuscriptSubmission, CoAuthor, EditorialRole, EditorialUser, AuthorProfile } from '../types';
 import QuillEditor from './QuillEditor';
 import AnalyticsDashboard from './AnalyticsDashboard';
@@ -37,6 +38,7 @@ import {
   Copy, 
   Sparkles, 
   CheckCircle, 
+  CheckCircle2, 
   Database, 
   LogOut, 
   Lock, 
@@ -68,7 +70,10 @@ import {
   X,
   Filter,
   Inbox,
-  UserPlus
+  UserPlus,
+  EyeOff,
+  Calendar,
+  AlertTriangle
 } from 'lucide-react';
 
 // Helper to recursively scrub undefined values from object payloads before sending to Firestore
@@ -134,6 +139,11 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   const [pdfLink, setPdfLink] = useState('');
   const [readTime, setReadTime] = useState('5 min read');
   const [publishDate, setPublishDate] = useState('');
+  const [originalPublishedAt, setOriginalPublishedAt] = useState('');
+  const [updatedAtTimestamp, setUpdatedAtTimestamp] = useState<number | null>(null);
+  const [showHistoricalCorrection, setShowHistoricalCorrection] = useState(false);
+  const [historicalCorrectionConfirmed, setHistoricalCorrectionConfirmed] = useState(false);
+  const [correctionDateInput, setCorrectionDateInput] = useState('');
   const [excerpt, setExcerpt] = useState('');
   const [content, setContent] = useState('');
   const [status, setStatus] = useState<'draft' | 'published' | 'scheduled'>('draft');
@@ -180,9 +190,16 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   const [newBookAuthor, setNewBookAuthor] = useState('');
   const [newBookLink, setNewBookLink] = useState('');
 
-  // Security Credentials Overrides (Instagram-style settings)
-  const [newSecurityKey, setNewSecurityKey] = useState('');
-  const [confirmSecurityKey, setConfirmSecurityKey] = useState('');
+  // Security Credentials & Password State
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [passwordSecurityError, setPasswordSecurityError] = useState<string | null>(null);
+  const [passwordSecuritySuccess, setPasswordSecuritySuccess] = useState<string | null>(null);
 
   // Status/Alert Indicators
   const [alert, setAlert] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -1027,7 +1044,27 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
       excerpt: sanitized.excerpt || (sanitized.title || title.trim()),
       content: sanitized.content || content,
       status: currentStatus,
-      publishDate: currentStatus === 'published' ? (publishDate.trim() || existingArt?.publishDate || new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })) : undefined,
+      // IMMUTABLE HISTORICAL PUBLICATION DATE LOGIC:
+      // 1. If existing article already has originalPublishedAt or publishDate, that historical date is IMMUTABLE.
+      // 2. Normal editing, saving, updating title/content/author/status NEVER alters this date.
+      // 3. Only if the article has NEVER been published before AND is now transitioning to 'published':
+      //    stamp originalPublishedAt with the current date.
+      originalPublishedAt: (() => {
+        const existingDate = existingArt?.originalPublishedAt || existingArt?.publishDate || (originalPublishedAt.trim() || undefined);
+        if (existingDate) return existingDate;
+        if (currentStatus === 'published') {
+          return new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+        }
+        return undefined;
+      })(),
+      publishDate: (() => {
+        const existingDate = existingArt?.originalPublishedAt || existingArt?.publishDate || (originalPublishedAt.trim() || undefined);
+        if (existingDate) return existingDate;
+        if (currentStatus === 'published') {
+          return new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+        }
+        return undefined;
+      })(),
       createdAt: existingArt?.createdAt || Date.now(),
       updatedAt: Date.now(),
       views: existingArt?.views || 0,
@@ -1045,6 +1082,30 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     };
 
     try {
+      // PRESERVE FIRST: When updating an existing article, query the live Firestore document
+      // to guarantee live view counts, createdAt, and historical publication date are never lost or downgraded.
+      if (editingId) {
+        try {
+          const liveDocSnap = await getDoc(doc(db, 'articles', finalId));
+          if (liveDocSnap.exists()) {
+            const liveData = liveDocSnap.data();
+            if (typeof liveData.views === 'number') {
+              articleData.views = liveData.views;
+            }
+            const liveDate = liveData.originalPublishedAt || liveData.publishDate;
+            if (liveDate) {
+              articleData.originalPublishedAt = liveDate;
+              articleData.publishDate = liveDate;
+            }
+            if (typeof liveData.createdAt === 'number') {
+              articleData.createdAt = liveData.createdAt;
+            }
+          }
+        } catch (fetchErr) {
+          console.warn('Live document audit check before save bypassed:', fetchErr);
+        }
+      }
+
       await setDoc(doc(db, 'articles', finalId), cleanUndefined(articleData));
       
       // If marked as featured, toggle all other featured pins off
@@ -1099,6 +1160,11 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setPdfLink('');
     setReadTime('5 min read');
     setPublishDate('');
+    setOriginalPublishedAt('');
+    setUpdatedAtTimestamp(null);
+    setShowHistoricalCorrection(false);
+    setHistoricalCorrectionConfirmed(false);
+    setCorrectionDateInput('');
     setExcerpt('');
     setContent('');
     setStatus('draft');
@@ -1135,7 +1201,13 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     setCanvaEmbed(art.canvaEmbed || '');
     setPdfLink(art.pdfLink || '');
     setReadTime(art.readTime || '5 min read');
-    setPublishDate(art.publishDate || '');
+    const existingPubDate = art.originalPublishedAt || art.publishDate || '';
+    setPublishDate(existingPubDate);
+    setOriginalPublishedAt(existingPubDate);
+    setUpdatedAtTimestamp(art.updatedAt || null);
+    setShowHistoricalCorrection(false);
+    setHistoricalCorrectionConfirmed(false);
+    setCorrectionDateInput(existingPubDate);
     setExcerpt(art.excerpt || '');
     setContent(art.content || '');
     setStatus(art.status);
@@ -1200,6 +1272,8 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
         title: `${art.title} (Duplicated)`,
         slug: `${art.slug}-copy`,
         status: 'draft',
+        originalPublishedAt: undefined,
+        publishDate: undefined,
         isFeatured: false,
         isPinned: false,
         views: 0,
@@ -1227,14 +1301,65 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   const handleTogglePublish = async (art: Article) => {
     const nextStatus = art.status === 'published' ? 'draft' : 'published';
     try {
-      await updateDoc(doc(db, 'articles', art.id), { 
+      const updates: any = { 
         status: nextStatus,
-        publishDate: nextStatus === 'published' ? new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null
-      });
-      setAlert({ text: `Article set to ${nextStatus.toUpperCase()}.`, type: 'success' });
+        updatedAt: Date.now()
+      };
+
+      // CRITICAL RULE: ONLY set originalPublishedAt if it has NEVER been set before.
+      // Changing LIVE -> DRAFT -> LIVE preserves originalPublishedAt forever.
+      // NEVER set originalPublishedAt or publishDate to null or overwrite existing dates!
+      const existingDate = art.originalPublishedAt || art.publishDate;
+      if (nextStatus === 'published' && !existingDate) {
+        // Double check live document directly from Firestore to ensure no client cache race
+        try {
+          const liveDocSnap = await getDoc(doc(db, 'articles', art.id));
+          const liveData = liveDocSnap.exists() ? liveDocSnap.data() : null;
+          const liveExistingDate = liveData?.originalPublishedAt || liveData?.publishDate;
+          if (liveExistingDate) {
+            updates.originalPublishedAt = liveExistingDate;
+            updates.publishDate = liveExistingDate;
+          } else {
+            const stampedDate = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+            updates.originalPublishedAt = stampedDate;
+            updates.publishDate = stampedDate;
+          }
+        } catch {
+          const stampedDate = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+          updates.originalPublishedAt = stampedDate;
+          updates.publishDate = stampedDate;
+        }
+      } else if (existingDate && !art.originalPublishedAt) {
+        // Backfill originalPublishedAt with existing historical publishDate if missing
+        updates.originalPublishedAt = existingDate;
+      }
+
+      await updateDoc(doc(db, 'articles', art.id), updates);
+      setAlert({ text: `Article set to ${nextStatus.toUpperCase()}. Historical publication date preserved.`, type: 'success' });
       await refreshArticles();
     } catch (e: any) {
       setAlert({ text: `Toggle failed: ${e.message}`, type: 'error' });
+    }
+  };
+
+  // Restricted administrative mechanism: Historical Metadata Correction
+  const handleApplyHistoricalCorrection = async () => {
+    if (!editingId || !correctionDateInput.trim() || !historicalCorrectionConfirmed) return;
+    try {
+      const cleanedDate = correctionDateInput.trim();
+      await updateDoc(doc(db, 'articles', editingId), { 
+        originalPublishedAt: cleanedDate,
+        publishDate: cleanedDate,
+        updatedAt: Date.now()
+      });
+      setOriginalPublishedAt(cleanedDate);
+      setPublishDate(cleanedDate);
+      setShowHistoricalCorrection(false);
+      setHistoricalCorrectionConfirmed(false);
+      setAlert({ text: `Historical publication date successfully updated to "${cleanedDate}".`, type: 'success' });
+      await refreshArticles();
+    } catch (e: any) {
+      setAlert({ text: `Historical correction failed: ${e.message}`, type: 'error' });
     }
   };
 
@@ -1285,27 +1410,68 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
     }
   };
 
-  // Securely update Administrator Password (Instagram-Style settings)
+  // Securely update Administrator Password with re-authentication via Firebase Auth
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSecurityKey.trim()) {
-      setAlert({ text: 'Security override key cannot be empty.', type: 'error' });
+    setPasswordSecurityError(null);
+    setPasswordSecuritySuccess(null);
+
+    // Validation
+    if (!currentPassword.trim()) {
+      setPasswordSecurityError('Current password is required.');
       return;
     }
-    if (newSecurityKey !== confirmSecurityKey) {
-      setAlert({ text: 'Keys do not match.', type: 'error' });
+    if (!newPassword.trim()) {
+      setPasswordSecurityError('New password is required.');
       return;
     }
-    
+    if (newPassword.length < 8) {
+      setPasswordSecurityError('Password must meet the required security requirements (minimum 8 characters).');
+      return;
+    }
+    if (newPassword === currentPassword) {
+      setPasswordSecurityError('New password cannot be the same as your current password.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordSecurityError('New passwords do not match.');
+      return;
+    }
+
+    const currentUser = auth.currentUser;
+    if (!currentUser || !currentUser.email) {
+      setPasswordSecurityError('No authenticated administrator session found. Please sign in again.');
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+
     try {
-      if (auth.currentUser) {
-        await updatePassword(auth.currentUser, newSecurityKey);
-        setAlert({ text: 'Administrator security override key updated successfully.', type: 'success' });
-        setNewSecurityKey('');
-        setConfirmSecurityKey('');
+      // 1. Verify current password by re-authenticating
+      const credential = EmailAuthProvider.credential(currentUser.email, currentPassword);
+      await reauthenticateWithCredential(currentUser, credential);
+
+      // 2. Safely update password in Firebase Authentication
+      await updatePassword(currentUser, newPassword);
+
+      // 3. Clear sensitive state and provide clear confirmation
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setPasswordSecuritySuccess('Password updated successfully.');
+    } catch (err: any) {
+      console.warn('Password change notice:', err.code, err.message);
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setPasswordSecurityError('Current password is incorrect.');
+      } else if (err.code === 'auth/weak-password') {
+        setPasswordSecurityError('Password must meet the required security requirements (minimum 8 characters).');
+      } else if (err.code === 'auth/requires-recent-login') {
+        setPasswordSecurityError('Your session has expired. Please sign out and sign back in before changing your password.');
+      } else {
+        setPasswordSecurityError(err.message || 'Failed to update password. Please try again.');
       }
-    } catch (e: any) {
-      setAlert({ text: `Security update rejected: ${e.message}`, type: 'error' });
+    } finally {
+      setIsUpdatingPassword(false);
     }
   };
 
@@ -1345,7 +1511,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
             { id: 'subscribers', label: `📧 Subscribers (${subscribers.length})`, roles: ['admin'] },
             { id: 'analytics', label: '📊 Analytics', roles: ['admin'] },
             { id: 'site_content', label: '🌐 Site Content & CMS', roles: ['admin'] },
-            { id: 'settings', label: '⚙ Security', roles: ['admin'] }
+            { id: 'settings', label: '⚙ Settings → Security', roles: ['admin'] }
           ]
             .filter(tab => tab.roles.includes(effectiveRole))
             .map((tab) => (
@@ -1711,29 +1877,101 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                 </div>
               </div>
 
-              {/* Row: Publication Date & Estimated Read Time */}
+              {/* Row: Publication Timeline (Published & Last Updated) & Estimated Read Time */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5 border-t border-paper/10 pt-4">
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex justify-between items-center">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40 flex items-center gap-1.5">
-                      <Clock size={11} className="text-blood" /> Published Date (Custom / Historical)
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setPublishDate(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}
-                      className="font-sans text-[8px] uppercase tracking-wider text-blood hover:underline cursor-pointer"
-                    >
-                      Set Today's Date
-                    </button>
+                {/* Immutably Audited Publication Timeline */}
+                <div className="bg-navy/50 border border-paper/10 p-3.5 rounded-sm space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1">
+                      <span className="font-sans text-[10px] uppercase tracking-wider text-paper/50 font-semibold flex items-center gap-1.5">
+                        <Calendar size={12} className="text-blood" /> Published
+                      </span>
+                      <span className="font-serif text-sm text-paper font-medium">
+                        {originalPublishedAt || (status === 'published' ? 'Will be stamped upon initial publication' : 'Not yet published (Draft)')}
+                      </span>
+                      <span className="font-serif text-[10px] text-paper/30 italic">
+                        Immutable historical record.
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <span className="font-sans text-[10px] uppercase tracking-wider text-paper/50 font-semibold flex items-center gap-1.5">
+                        <Clock size={12} className="text-paper/40" /> Last Updated
+                      </span>
+                      <span className="font-serif text-sm text-paper font-medium">
+                        {updatedAtTimestamp ? new Date(updatedAtTimestamp).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : (editingId ? 'Not recorded' : 'New manuscript')}
+                      </span>
+                      <span className="font-serif text-[10px] text-paper/30 italic">
+                        Auto-updates upon save.
+                      </span>
+                    </div>
                   </div>
-                  <input
-                    type="text"
-                    placeholder="DD Month YYYY or YYYY-MM-DD"
-                    value={publishDate}
-                    onChange={(e) => setPublishDate(e.target.value)}
-                    className="bg-navy border border-paper/10 rounded-sm py-2.5 px-3 text-paper font-serif focus:outline-none focus:border-blood text-sm"
-                  />
-                  <span className="font-serif text-[10px] text-paper/30 italic">Leave blank to automatically stamp the date when published.</span>
+
+                  {/* Restricted Emergency Mechanism: Historical Metadata Correction */}
+                  {editingId && (
+                    <div className="pt-2 border-t border-paper/10">
+                      {!showHistoricalCorrection ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowHistoricalCorrection(true);
+                            setCorrectionDateInput(originalPublishedAt);
+                            setHistoricalCorrectionConfirmed(false);
+                          }}
+                          className="text-[10px] font-sans text-paper/40 hover:text-blood flex items-center gap-1.5 cursor-pointer transition-colors"
+                        >
+                          <Lock size={11} /> Historical Metadata Correction (Restricted)
+                        </button>
+                      ) : (
+                        <div className="bg-midnight/90 border border-blood/30 p-3 rounded-sm space-y-2.5 mt-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-sans text-[10px] uppercase tracking-wider text-blood font-bold flex items-center gap-1.5">
+                              <AlertTriangle size={12} className="text-blood" /> Historical Metadata Correction
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowHistoricalCorrection(false);
+                                setHistoricalCorrectionConfirmed(false);
+                              }}
+                              className="text-[10px] text-paper/40 hover:text-paper"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          <p className="font-serif text-[11px] text-paper/60">
+                            Emergency override only. Standard editing, saving, or Live/Draft toggles never modify the historical publication date.
+                          </p>
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                            <input
+                              type="text"
+                              value={correctionDateInput}
+                              onChange={(e) => setCorrectionDateInput(e.target.value)}
+                              placeholder="e.g. 6 July 2026"
+                              className="bg-navy border border-paper/20 rounded-sm py-1.5 px-2.5 text-paper font-serif text-xs focus:outline-none focus:border-blood w-full sm:w-48"
+                            />
+                            <label className="flex items-center gap-1.5 text-[10px] font-serif text-paper/70 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={historicalCorrectionConfirmed}
+                                onChange={(e) => setHistoricalCorrectionConfirmed(e.target.checked)}
+                                className="accent-blood rounded"
+                              />
+                              Confirm intentional correction
+                            </label>
+                            <button
+                              type="button"
+                              disabled={!historicalCorrectionConfirmed || !correctionDateInput.trim()}
+                              onClick={handleApplyHistoricalCorrection}
+                              className="px-2.5 py-1 bg-blood text-paper font-sans text-[9px] uppercase tracking-wider rounded-sm disabled:opacity-30 disabled:cursor-not-allowed hover:bg-blood-dark cursor-pointer transition-colors"
+                            >
+                              Apply
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-1.5">
@@ -2201,7 +2439,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                     </div>
                     
                     <p className="text-[12px] text-[#bdc1c6] font-sans leading-relaxed line-clamp-2 mt-0.5">
-                      <span className="text-[#9aa0a6]">{publishDate || 'Recent'} — </span>
+                      <span className="text-[#9aa0a6]">{originalPublishedAt || publishDate || 'Recent'} — </span>
                       {metaDescription.trim() || excerpt.trim() || 'Independent research and scholarly analysis into crime, human psychology, politics, and systemic power dynamics.'}
                     </p>
                   </div>
@@ -2754,6 +2992,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                           <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Article</th>
                           <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Category</th>
                           <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Status</th>
+                          <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Published</th>
                           <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Views</th>
                           <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4 text-right">Actions</th>
                         </tr>
@@ -2790,6 +3029,9 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
                                   {art.status === 'published' ? 'Live' : 'Draft'}
                                 </span>
                               )}
+                            </td>
+                            <td className="py-4 px-4 font-serif text-xs text-paper/60 whitespace-nowrap">
+                              {art.originalPublishedAt || art.publishDate || (art.status === 'published' ? (art.createdAt ? new Date(art.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'No data available') : '—')}
                             </td>
                             <td className="py-4 px-4 font-mono text-xs text-paper/40">{art.views || 0}</td>
                             <td className="py-4 px-4 text-right">
@@ -3068,46 +3310,205 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
           {/* ══ TAB 6: SECURITY & SETTINGS ══ */}
           {activeTab === 'settings' && (
-            <div className="flex flex-col gap-6 fade-in select-text">
-              <div className="bg-navy border border-paper/10 p-6 rounded-sm shadow-xl flex flex-col gap-5">
-                <h3 className="font-display text-base font-bold text-paper border-b border-paper/5 pb-2 flex items-center gap-2">
-                  <Lock size={14} className="text-blood" /> Password &amp; Administrative Credentials (Instagram-Style)
-                </h3>
-                
-                <p className="font-serif text-sm text-paper/50 leading-relaxed -mt-2">
-                  Update your active admin session credential key here. Updates sync directly to secure Firebase Auth structures instantly, overriding the default deployment code configurations securely.
+            <div className="flex flex-col gap-8 fade-in select-text max-w-4xl">
+              {/* Header breadcrumb / title */}
+              <div>
+                <div className="flex items-center gap-2 text-xs font-sans text-paper/40 uppercase tracking-widest mb-1">
+                  <span>Settings</span>
+                  <span>→</span>
+                  <span className="text-blood font-semibold">Security</span>
+                </div>
+                <h2 className="font-gothic text-2xl text-paper">Admin Account &amp; Security Settings</h2>
+                <p className="font-serif text-xs text-paper/50 mt-1">
+                  Manage your authenticated administrator credentials, password updates, and session security.
                 </p>
+              </div>
 
-                <form onSubmit={handleUpdatePassword} className="flex flex-col gap-4 select-text">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="flex flex-col gap-1.5">
-                      <label className="font-sans text-[9px] uppercase tracking-wider text-paper/30">New Security Override Key *</label>
+              {/* Section 1: Admin Account Overview */}
+              <div className="bg-navy border border-paper/10 p-6 rounded-sm shadow-xl flex flex-col gap-5">
+                <div className="flex items-center justify-between border-b border-paper/10 pb-3">
+                  <div>
+                    <h3 className="font-sans text-xs font-bold uppercase tracking-wider text-paper flex items-center gap-2">
+                      <ShieldCheck size={16} className="text-blood" />
+                      Admin Account
+                    </h3>
+                    <p className="font-serif text-xs text-paper/40 mt-0.5">
+                      Designated sole administrator of The Oligarchy
+                    </p>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-[10px] font-sans font-semibold tracking-wider uppercase bg-blood/10 text-blood border border-blood/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blood animate-pulse" />
+                    Authorized Superadmin
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div className="bg-midnight/80 border border-paper/10 p-4 rounded-sm flex flex-col gap-1">
+                    <span className="font-sans text-[10px] uppercase tracking-wider text-paper/40 font-semibold">
+                      Current Account Email
+                    </span>
+                    <span className="font-serif text-sm text-paper font-medium truncate select-all">
+                      {auth.currentUser?.email || 'theoligarchy.ppj@gmail.com'}
+                    </span>
+                  </div>
+
+                  <div className="bg-midnight/80 border border-paper/10 p-4 rounded-sm flex flex-col gap-1">
+                    <span className="font-sans text-[10px] uppercase tracking-wider text-paper/40 font-semibold">
+                      Authentication Provider
+                    </span>
+                    <span className="font-serif text-sm text-paper font-medium">
+                      Firebase Authentication (Strict Token Verification)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-paper/5">
+                  <span className="font-serif text-xs text-paper/40">
+                    Terminate your active administrative session on this device
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSignOutAction}
+                    className="bg-paper/5 hover:bg-paper/10 border border-paper/15 text-paper hover:text-white font-sans text-xs font-bold tracking-wider uppercase py-2 px-4 rounded-sm flex items-center gap-2 transition-all cursor-pointer"
+                  >
+                    <LogOut size={13} className="text-paper/60" />
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+
+              {/* Section 2: Change Password (Instagram-Style) */}
+              <div className="bg-navy border border-paper/10 p-6 rounded-sm shadow-xl flex flex-col gap-6">
+                <div className="border-b border-paper/10 pb-3">
+                  <h3 className="font-sans text-xs font-bold uppercase tracking-wider text-paper flex items-center gap-2">
+                    <Lock size={15} className="text-blood" />
+                    Change Password
+                  </h3>
+                  <p className="font-serif text-xs text-paper/40 mt-0.5">
+                    Update your administrative password via Firebase Authentication. Current password re-authentication is required.
+                  </p>
+                </div>
+
+                {/* Feedback alerts */}
+                {passwordSecuritySuccess && (
+                  <div className="bg-green-950/20 text-[#8bc4a8] border border-green-500/20 p-4 rounded-sm flex gap-3 text-xs items-center">
+                    <CheckCircle2 size={16} className="shrink-0 text-[#8bc4a8]" />
+                    <span className="font-serif">{passwordSecuritySuccess}</span>
+                  </div>
+                )}
+
+                {passwordSecurityError && (
+                  <div className="bg-red-950/20 text-red-400 border border-red-500/20 p-4 rounded-sm flex gap-3 text-xs items-center">
+                    <AlertCircle size={16} className="shrink-0 text-red-400" />
+                    <span className="font-serif">{passwordSecurityError}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleUpdatePassword} className="flex flex-col gap-5">
+                  {/* Current Password */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                      Current Password *
+                    </label>
+                    <div className="relative flex items-center bg-midnight border border-paper/10 rounded-sm px-3 py-2 text-sm focus-within:border-blood">
+                      <Lock size={14} className="text-paper/30 mr-2.5 shrink-0" />
                       <input
-                        type="password"
-                        placeholder="••••••••••••"
-                        value={newSecurityKey}
-                        onChange={(e) => setNewSecurityKey(e.target.value)}
-                        className="bg-midnight border border-paper/10 rounded-sm py-2 px-3 text-paper font-serif text-xs focus:outline-none focus:border-blood"
+                        type={showCurrentPassword ? 'text' : 'password'}
+                        placeholder="Enter current password"
+                        value={currentPassword}
+                        onChange={(e) => {
+                          setCurrentPassword(e.target.value);
+                          setPasswordSecurityError(null);
+                        }}
+                        disabled={isUpdatingPassword}
+                        className="bg-transparent text-paper font-serif text-xs focus:outline-none w-full placeholder-paper/20 pr-2"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowCurrentPassword((prev) => !prev)}
+                        aria-label={showCurrentPassword ? 'Hide current password' : 'Show current password'}
+                        className="text-paper/30 hover:text-paper/70 transition-colors p-0.5 ml-1 shrink-0 cursor-pointer focus:outline-none"
+                      >
+                        {showCurrentPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
                     </div>
+                    <span className="font-serif text-[11px] text-paper/30">
+                      Required to verify ownership and re-authenticate before applying changes.
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* New Password */}
                     <div className="flex flex-col gap-1.5">
-                      <label className="font-sans text-[9px] uppercase tracking-wider text-paper/30">Confirm Override Key *</label>
-                      <input
-                        type="password"
-                        placeholder="••••••••••••"
-                        value={confirmSecurityKey}
-                        onChange={(e) => setConfirmSecurityKey(e.target.value)}
-                        className="bg-midnight border border-paper/10 rounded-sm py-2 px-3 text-paper font-serif text-xs focus:outline-none focus:border-blood"
-                      />
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                        New Password *
+                      </label>
+                      <div className="relative flex items-center bg-midnight border border-paper/10 rounded-sm px-3 py-2 text-sm focus-within:border-blood">
+                        <Lock size={14} className="text-paper/30 mr-2.5 shrink-0" />
+                        <input
+                          type={showNewPassword ? 'text' : 'password'}
+                          placeholder="At least 8 characters"
+                          value={newPassword}
+                          onChange={(e) => {
+                            setNewPassword(e.target.value);
+                            setPasswordSecurityError(null);
+                          }}
+                          disabled={isUpdatingPassword}
+                          className="bg-transparent text-paper font-serif text-xs focus:outline-none w-full placeholder-paper/20 pr-2"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewPassword((prev) => !prev)}
+                          aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
+                          className="text-paper/30 hover:text-paper/70 transition-colors p-0.5 ml-1 shrink-0 cursor-pointer focus:outline-none"
+                        >
+                          {showNewPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Confirm New Password */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                        Confirm New Password *
+                      </label>
+                      <div className="relative flex items-center bg-midnight border border-paper/10 rounded-sm px-3 py-2 text-sm focus-within:border-blood">
+                        <Lock size={14} className="text-paper/30 mr-2.5 shrink-0" />
+                        <input
+                          type={showConfirmPassword ? 'text' : 'password'}
+                          placeholder="Re-enter new password"
+                          value={confirmNewPassword}
+                          onChange={(e) => {
+                            setConfirmNewPassword(e.target.value);
+                            setPasswordSecurityError(null);
+                          }}
+                          disabled={isUpdatingPassword}
+                          className="bg-transparent text-paper font-serif text-xs focus:outline-none w-full placeholder-paper/20 pr-2"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmPassword((prev) => !prev)}
+                          aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                          className="text-paper/30 hover:text-paper/70 transition-colors p-0.5 ml-1 shrink-0 cursor-pointer focus:outline-none"
+                        >
+                          {showConfirmPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
-                  <button
-                    type="submit"
-                    className="bg-blood hover:bg-blood-light text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-2.5 rounded-sm w-fit px-6 shadow-md transition-all cursor-pointer"
-                  >
-                    Commit Key Update
-                  </button>
+                  <div className="flex items-center gap-4 pt-2">
+                    <button
+                      type="submit"
+                      disabled={isUpdatingPassword}
+                      className="bg-blood hover:bg-blood-light disabled:bg-blood/40 text-paper font-sans text-xs font-bold tracking-widest uppercase py-3 px-8 rounded-sm shadow-md transition-all cursor-pointer"
+                    >
+                      {isUpdatingPassword ? 'Updating Password...' : 'Update Password'}
+                    </button>
+                    <span className="font-serif text-[11px] text-paper/30">
+                      Never stored in plain text or local storage. Managed securely by Firebase Authentication.
+                    </span>
+                  </div>
                 </form>
               </div>
             </div>

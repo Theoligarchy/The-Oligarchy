@@ -23,20 +23,23 @@ import { Article, ReadingItem, ResearchTip, NewsletterSubscriber } from './types
 import { INITIAL_SEED_ARTICLES, INITIAL_SEED_READING } from './data/initialSeed';
 import { getCachedArticles } from './utils/articleCache';
 
+import firebaseAppletConfig from '../firebase-applet-config.json';
+
 // Read configuration
 const firebaseConfig = {
-  projectId: "balmy-framing-jj1d7",
-  appId: "1:214639932128:web:eac4df8af286d485129685",
-  apiKey: "AIzaSyAsbdYOc7qhoaOauFUi5qiELvxKHgFICjg",
-  authDomain: "balmy-framing-jj1d7.firebaseapp.com",
-  firestoreDatabaseId: "ai-studio-theoligarchy-56998575-a2c5-4cbc-8cbc-dd66e1c68ca1",
-  storageBucket: "balmy-framing-jj1d7.firebasestorage.app",
-  messagingSenderId: "214639932128",
+  projectId: firebaseAppletConfig.projectId,
+  appId: firebaseAppletConfig.appId,
+  apiKey: firebaseAppletConfig.apiKey,
+  authDomain: firebaseAppletConfig.authDomain,
+  firestoreDatabaseId: firebaseAppletConfig.firestoreDatabaseId || 'default',
+  storageBucket: firebaseAppletConfig.storageBucket,
+  messagingSenderId: firebaseAppletConfig.messagingSenderId,
 };
 
 // Initialize Firebase
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
   localCache: persistentLocalCache({
     tabManager: persistentMultipleTabManager()
   })
@@ -149,7 +152,8 @@ export async function fetchArticlePreviews(options: FetchArticlesOptions = {}): 
         excerpt: data.excerpt || '',
         content: data.content || '', // will be populated from cache or full fetch if needed
         status: data.status || 'published',
-        publishDate: data.publishDate || '',
+        originalPublishedAt: data.originalPublishedAt || data.publishDate || undefined,
+        publishDate: data.originalPublishedAt || data.publishDate || '',
         scheduledAt: data.scheduledAt,
         createdAt: data.createdAt || Date.now(),
         updatedAt: data.updatedAt || Date.now(),
@@ -232,7 +236,8 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
         excerpt: data.excerpt || '',
         content: data.content || '',
         status: data.status || 'published',
-        publishDate: data.publishDate || '',
+        originalPublishedAt: data.originalPublishedAt || data.publishDate || undefined,
+        publishDate: data.originalPublishedAt || data.publishDate || '',
         scheduledAt: data.scheduledAt,
         createdAt: data.createdAt || Date.now(),
         updatedAt: data.updatedAt || Date.now(),
@@ -275,7 +280,8 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
         excerpt: data.excerpt || '',
         content: data.content || '',
         status: data.status || 'published',
-        publishDate: data.publishDate || '',
+        originalPublishedAt: data.originalPublishedAt || data.publishDate || undefined,
+        publishDate: data.originalPublishedAt || data.publishDate || '',
         scheduledAt: data.scheduledAt,
         createdAt: data.createdAt || Date.now(),
         updatedAt: data.updatedAt || Date.now(),

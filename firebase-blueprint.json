@@ -116,6 +116,24 @@
       },
       "required": ["articleId", "articleTitle", "timestamp"]
     },
+    "ActiveSession": {
+      "title": "ActiveSession",
+      "description": "Live active reader presence heartbeat record.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "description": "Browser tab session ID" },
+        "visitorId": { "type": "string", "description": "Anonymous visitor identifier" },
+        "page": { "type": "string", "description": "Active page or view" },
+        "articleId": { "type": "string", "description": "Active article ID" },
+        "articleTitle": { "type": "string", "description": "Active article title" },
+        "startedAt": { "type": "number", "description": "Session start timestamp" },
+        "lastActive": { "type": "number", "description": "Heartbeat timestamp" },
+        "deviceType": { "type": "string", "description": "Detected client device" },
+        "browser": { "type": "string", "description": "Detected browser" },
+        "referrer": { "type": "string", "description": "Referring traffic source" }
+      },
+      "required": ["sessionId", "visitorId", "page", "startedAt", "lastActive"]
+    },
     "ManuscriptSubmission": {
       "title": "ManuscriptSubmission",
       "description": "Scholarly investigation pitch or complete research manuscript submitted for editorial peer triage.",
@@ -218,6 +236,10 @@
     "/views_log/{viewId}": {
       "schema": "ViewLog",
       "description": "Readership view telemetry events."
+    },
+    "/active_sessions/{sessionId}": {
+      "schema": "ActiveSession",
+      "description": "Live active reader presence heartbeat records."
     },
     "/submissions/{submissionId}": {
       "schema": "ManuscriptSubmission",

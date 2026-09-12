@@ -1,6 +1,7 @@
 import { EditorialRole, EditorialUser, Article } from '../types';
 import { db } from '../firebase';
 import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 
 export const INITIAL_EDITORIAL_TEAM: EditorialUser[] = [
   {
@@ -226,7 +227,7 @@ export async function resolveEditorialUser(authUser: { email?: string | null; ui
 export async function saveEditorialMember(member: EditorialUser): Promise<void> {
   try {
     const docRef = doc(db, 'editorial_team', member.uid);
-    await setDoc(docRef, member, { merge: true });
+    await setDoc(docRef, sanitizeFirestoreData(member), { merge: true });
     
     // Update local cache
     const team = await fetchEditorialTeam();

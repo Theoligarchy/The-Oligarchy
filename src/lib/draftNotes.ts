@@ -21,6 +21,7 @@ import {
   SavedArticle,
   PeerAnnotation
 } from '../types';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 
 const DRAFT_NOTES_COLLECTION = 'draft_notes';
 const LOCAL_STORAGE_DRAFT_NOTES_KEY = 'tol_draft_notes_cache';
@@ -103,7 +104,7 @@ export async function createDraftNote(noteData: Omit<DraftInternalNote, 'id' | '
 
   try {
     const docRef = doc(db, DRAFT_NOTES_COLLECTION, newNote.id);
-    await setDoc(docRef, newNote);
+    await setDoc(docRef, sanitizeFirestoreData(newNote));
   } catch (e) {
     console.warn('Failed to save draft note to Firestore, falling back to localStorage:', e);
   }

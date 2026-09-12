@@ -1651,7 +1651,7 @@ https://theoligarchy.in
                             <div className="font-sans text-[8px] uppercase tracking-widest text-paper/40 flex items-center gap-2 mt-0.5">
                               <span className="capitalize text-blood-light font-semibold">{art.category}</span>
                               <span>•</span>
-                              <span>Published {art.publishDate || new Date(art.createdAt).toLocaleDateString('en-GB')}</span>
+                              <span>Published {art.originalPublishedAt || art.publishDate || (art.createdAt ? new Date(art.createdAt).toLocaleDateString('en-GB') : 'No data available')}</span>
                               {art.doi && (
                                 <>
                                   <span>•</span>
@@ -1853,7 +1853,7 @@ https://theoligarchy.in
                                 <span>•</span>
                                 <span>{art.readTime || '8 min read'}</span>
                                 <span>•</span>
-                                <span>{art.publishDate || new Date(art.createdAt).toLocaleDateString('en-GB')}</span>
+                                <span>{art.originalPublishedAt || art.publishDate || (art.createdAt ? new Date(art.createdAt).toLocaleDateString('en-GB') : 'No data available')}</span>
                               </div>
                             </td>
 
