@@ -13,8 +13,10 @@ import {
   increment
 } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Article, ReadingItem, AuthorProfile, SavedArticle, SiteSettings } from './types';
+import { Article, ReadingItem, AuthorProfile, SavedArticle, SiteSettings, SignupLocation } from './types';
 import { fetchSiteSettings, getCachedSiteSettings, DEFAULT_SITE_SETTINGS } from './utils/siteSettings';
+import { trackNewsletterConversion } from './utils/attributionTracker';
+import { getOrCreateVisitorId, getOrCreateSessionId } from './utils/analyticsTracker';
 
 // Import modular subcomponents
 import Header from './components/Header';
@@ -77,8 +79,10 @@ import FloatingShareMenu from './components/FloatingShareMenu';
 import FootnotePopover, { ActiveFootnoteState } from './components/FootnotePopover';
 import AuthorBioCard from './components/AuthorBioCard';
 import { transformFootnotesInHtml } from './utils/footnoteTransformer';
+import { injectContentBlockIds } from './utils/contentBlockIdentifier';
+import { setupResonantQuoteTracker } from './utils/resonantQuoteTracker';
 import { compileScholarlyPDF } from './utils/pdfCompiler';
-import { trackPageView, setupScrollTracker, stopActiveHeartbeat } from './utils/analyticsTracker';
+import { trackPageView, setupScrollTracker, setupArticleScrollTracker, stopActiveHeartbeat } from './utils/analyticsTracker';
 
 // Log view entries to firestore views_log with real device, session, and reading duration tracking
 const logViewEntry = async (art: Article) => {
@@ -131,6 +135,10 @@ export default function App() {
   const [newsletterTouched, setNewsletterTouched] = useState(false);
   const [shakeTrigger, setShakeTrigger] = useState(0);
   const [isSubmittingNewsletter, setIsSubmittingNewsletter] = useState(false);
+
+  // In-article newsletter card states
+  const [inArticleEmail, setInArticleEmail] = useState('');
+  const [inArticleNewsletterSuccess, setInArticleNewsletterSuccess] = useState(false);
 
   // Pagination count
   const [articlesPerPage, setArticlesPerPage] = useState<number>(6);
@@ -283,13 +291,27 @@ export default function App() {
       trackPageView(activeTab, null);
     }
     
-    // Setup scroll tracking for attention calculation
-    const cleanupScroll = setupScrollTracker();
+    // Setup container-specific scroll tracking for article view, or general page scroll
+    const cleanupScroll = activeTab === 'article-view'
+      ? setupArticleScrollTracker('article-body-content')
+      : setupScrollTracker();
+
+    // Resonant Quotes Telemetry: Tracks privacy-safe text interactions (highlights & copies) inside article body
+    let cleanupResonantQuotes: (() => void) | null = null;
+    if (activeTab === 'article-view' && selectedArticle) {
+      cleanupResonantQuotes = setupResonantQuoteTracker(selectedArticle, 'article-body-content');
+    }
 
     return () => {
       cleanupScroll();
+      if (cleanupResonantQuotes) {
+        cleanupResonantQuotes();
+      }
+      if (activeTab === 'article-view') {
+        stopActiveHeartbeat();
+      }
     };
-  }, [activeTab]);
+  }, [activeTab, selectedArticle?.id]);
 
   const loadData = async () => {
     try {
@@ -659,26 +681,36 @@ export default function App() {
     }
   };
 
-  // Handle Newsletter Registration
-  const handleSubscribeNewsletter = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Handle Newsletter Registration with Multi-Touch Conversion Attribution
+  const handleSubscribeNewsletter = async (
+    e?: React.FormEvent,
+    customEmail?: string,
+    location: SignupLocation = 'homepage',
+    articleOverride?: Article | null
+  ): Promise<boolean> => {
+    if (e) e.preventDefault();
+    const rawEmail = customEmail !== undefined ? customEmail : newsletterEmail;
     setNewsletterTouched(true);
 
-    const trimmed = newsletterEmail.trim();
+    const trimmed = rawEmail.trim();
     if (!trimmed) {
       setNewsletterError('Email address cannot be empty.');
       setShakeTrigger(prev => prev + 1);
-      return;
+      return false;
     }
 
     if (!validateEmailFormat(trimmed)) {
       setNewsletterError('Please enter a valid email address (e.g., scholar@domain.edu).');
       setShakeTrigger(prev => prev + 1);
-      return;
+      return false;
     }
 
     setNewsletterError(null);
     setIsSubmittingNewsletter(true);
+
+    const targetArticle = articleOverride !== undefined
+      ? articleOverride
+      : (activeTab === 'article-view' ? selectedArticle : null);
 
     try {
       const subsCol = collection(db, 'subscribers');
@@ -686,14 +718,49 @@ export default function App() {
         email: trimmed,
         subscribedAt: Date.now()
       });
-      setNewsletterEmail('');
+
+      if (customEmail === undefined) {
+        setNewsletterEmail('');
+      }
       setNewsletterSuccess(true);
       setNewsletterTouched(false);
       setTimeout(() => setNewsletterSuccess(false), 8000);
+
+      // Track Privacy-Safe Subscriber Conversion Attribution (Zero-PII)
+      try {
+        const { visitorId } = getOrCreateVisitorId();
+        const sessionId = getOrCreateSessionId();
+        await trackNewsletterConversion({
+          visitorId,
+          sessionId,
+          signupLocation: location,
+          currentArticle: targetArticle,
+          status: 'confirmed'
+        });
+      } catch (trackErr) {
+        console.warn('Conversion attribution logging non-blocking error:', trackErr);
+      }
+
+      return true;
     } catch (err) {
       console.error('Newsletter error:', err);
       setNewsletterError('A database error occurred. Please try again.');
       setShakeTrigger(prev => prev + 1);
+
+      // Log failed conversion attempt for integrity audit
+      try {
+        const { visitorId } = getOrCreateVisitorId();
+        const sessionId = getOrCreateSessionId();
+        trackNewsletterConversion({
+          visitorId,
+          sessionId,
+          signupLocation: location,
+          currentArticle: targetArticle,
+          status: 'failed'
+        });
+      } catch {}
+
+      return false;
     } finally {
       setIsSubmittingNewsletter(false);
     }
@@ -751,10 +818,12 @@ export default function App() {
   // Helper to parse HTML content into interactive paragraphs and section nodes with clickable citation footnotes
   const renderInteractiveContent = (contentHtml: string) => {
     if (!contentHtml) return null;
-    const transformedHtml = transformFootnotesInHtml(contentHtml);
+    const transformedFootnotes = transformFootnotesInHtml(contentHtml);
+    const transformedHtml = injectContentBlockIds(transformedFootnotes);
 
     return (
       <div 
+        id="article-body-content"
         className="article-content select-text selection:bg-blood selection:text-paper"
         onClick={handleArticleBodyClick}
         dangerouslySetInnerHTML={{ __html: transformedHtml }}
@@ -1736,7 +1805,7 @@ export default function App() {
               {/* ARTICLE BODY OR RESPONSIVE CANVA ENGINE EMBED */}
               {selectedArticle.canvaEmbed ? (
                 // If Canva Embed field is populated, mount responsive iframe container & hide text blocks
-                <div className="my-4">
+                <div id="article-body-content" className="my-4 article-content">
                   <CanvaEmbed embedSource={selectedArticle.canvaEmbed} />
                 </div>
               ) : (
@@ -1889,6 +1958,55 @@ export default function App() {
                 }}
               />
 
+              {/* In-Article Research Brief Newsletter Conversion Card */}
+              <div className="border border-paper/15 bg-navy/90 p-8 rounded-sm mt-12 mb-6 text-center select-none shadow-xl relative overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blood via-blood-light to-blood" />
+                <span className="font-sans text-[10px] font-bold tracking-[0.3em] uppercase text-blood">
+                  Continue The Inquiry
+                </span>
+                <h3 className="font-display text-xl md:text-2xl font-bold text-paper mt-1">
+                  The Research Brief Dispatch
+                </h3>
+                <p className="font-serif text-xs md:text-sm text-paper/60 max-w-lg mx-auto leading-relaxed mt-2 mb-5">
+                  Receive forthcoming forensic analyses, theoretical syntheses, and peer review notices delivered directly to your inbox. Non-commercial, privacy-respecting.
+                </p>
+
+                {inArticleNewsletterSuccess ? (
+                  <div className="bg-green-950/20 border border-green-500/30 text-[#8bc4a8] font-serif text-xs p-3.5 rounded-sm max-w-md mx-auto flex items-center justify-center gap-2">
+                    <CheckCircle2 size={15} className="text-[#8bc4a8]" />
+                    <span>You are subscribed to The Research Brief. Thank you for reading The Oligarchy.</span>
+                  </div>
+                ) : (
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const ok = await handleSubscribeNewsletter(undefined, inArticleEmail, 'in-article', selectedArticle);
+                      if (ok) {
+                        setInArticleEmail('');
+                        setInArticleNewsletterSuccess(true);
+                        setTimeout(() => setInArticleNewsletterSuccess(false), 8000);
+                      }
+                    }}
+                    className="max-w-md mx-auto flex flex-col sm:flex-row gap-2 select-text"
+                  >
+                    <input
+                      type="email"
+                      placeholder="scholar@domain.edu"
+                      value={inArticleEmail}
+                      onChange={(e) => setInArticleEmail(e.target.value)}
+                      className="bg-midnight border border-paper/20 rounded-xs px-3.5 py-2 text-paper font-serif text-xs focus:outline-none focus:border-blood flex-1 placeholder-paper/25"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSubmittingNewsletter}
+                      className="bg-blood hover:bg-blood-light disabled:opacity-50 text-paper font-sans text-xs font-bold uppercase tracking-wider px-5 py-2 rounded-xs transition-colors cursor-pointer shrink-0"
+                    >
+                      {isSubmittingNewsletter ? 'Joining...' : 'Subscribe'}
+                    </button>
+                  </form>
+                )}
+              </div>
+
             </article>
           </div>
           )
@@ -1902,6 +2020,7 @@ export default function App() {
           setActiveTab={setActiveTab} 
           setCategoryFilter={setCategoryFilter} 
           siteSettings={siteSettings}
+          onSubscribe={(email, loc) => handleSubscribeNewsletter(undefined, email, loc)}
         />
       )}
 

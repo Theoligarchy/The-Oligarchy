@@ -194,9 +194,58 @@
         "updatedAt": { "type": "number", "description": "Last update timestamp" }
       },
       "required": ["siteName", "tagline", "aboutText"]
+    },
+    "ConversionEvent": {
+      "title": "ConversionEvent",
+      "description": "Privacy-safe newsletter subscription attribution event linking subscriber journey touchpoints without PII.",
+      "type": "object",
+      "properties": {
+        "eventType": { "type": "string", "enum": ["newsletter_signup"], "description": "Type of conversion event" },
+        "visitorId": { "type": "string", "description": "Anonymous persistent visitor ID" },
+        "sessionId": { "type": "string", "description": "Anonymous session ID" },
+        "firstTouchArticleId": { "type": "string", "description": "First article visited within attribution window" },
+        "firstTouchArticleTitle": { "type": "string", "description": "Title of first touch article" },
+        "lastTouchArticleId": { "type": "string", "description": "Most recent article visited prior to conversion" },
+        "lastTouchArticleTitle": { "type": "string", "description": "Title of last touch article" },
+        "conversionArticleId": { "type": "string", "description": "Article on which form was submitted (null if non-article page)" },
+        "conversionArticleTitle": { "type": "string", "description": "Title of conversion article" },
+        "signupLocation": { "type": "string", "enum": ["in-article", "homepage", "footer", "drawer", "modal", "unknown"], "description": "UI location of signup form" },
+        "referrer": { "type": "string", "description": "Referring URL or traffic source" },
+        "timestamp": { "type": "number", "description": "Conversion epoch timestamp in ms" },
+        "attributionWindowDays": { "type": "number", "description": "Attribution lookback window in days (default: 7)" },
+        "subscriptionStatus": { "type": "string", "enum": ["submitted", "confirmed", "failed"], "description": "Subscription lifecycle status" }
+      },
+      "required": ["eventType", "visitorId", "sessionId", "signupLocation", "timestamp", "attributionWindowDays", "subscriptionStatus"]
+    },
+    "ResonantQuoteEvent": {
+      "title": "ResonantQuoteEvent",
+      "description": "Zero-PII text interaction event (highlight or copy of a stable content block inside an article body).",
+      "type": "object",
+      "properties": {
+        "eventType": { "type": "string", "enum": ["resonant_quote_interaction"] },
+        "articleId": { "type": "string", "description": "Associated article identifier" },
+        "articleTitle": { "type": "string", "description": "Investigation title" },
+        "category": { "type": "string", "description": "Academic discipline domain" },
+        "seriesName": { "type": "string", "description": "Investigation series name if applicable" },
+        "contentBlockId": { "type": "string", "description": "Deterministic content block hash identifier" },
+        "interactionType": { "type": "string", "enum": ["highlight", "copy"], "description": "Type of text interaction" },
+        "sessionId": { "type": "string", "description": "Ephemeral anonymous session identifier" },
+        "anonymousVisitorId": { "type": "string", "description": "Anonymous client identifier" },
+        "timestamp": { "type": "number", "description": "Interaction timestamp in epoch milliseconds" },
+        "pageVersion": { "type": "string", "description": "Article revision or publication version string" }
+      },
+      "required": ["eventType", "articleId", "contentBlockId", "interactionType", "sessionId", "timestamp"]
     }
   },
   "firestore": {
+    "/resonant_quote_interactions/{interactionId}": {
+      "schema": "ResonantQuoteEvent",
+      "description": "Anonymous reader highlight and copy text interaction telemetry."
+    },
+    "/conversion_events/{eventId}": {
+      "schema": "ConversionEvent",
+      "description": "Subscriber conversion attribution records connecting reading journeys to newsletter registrations without PII."
+    },
     "/settings/{settingId}": {
       "schema": "SiteSettings",
       "description": "Global publication configuration and editorial policies."

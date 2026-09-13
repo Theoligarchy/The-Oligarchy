@@ -70,11 +70,25 @@ service cloud.firestore {
       allow update, delete: if isDesignatedAdmin();
     }
 
+    // Subscriber Conversion Attribution Events (Zero PII)
+    match /conversion_events/{eventId} {
+      allow create: if true; // Public can record privacy-safe conversion event upon signup
+      allow read: if true; // Analytics dashboard reads conversion events
+      allow update, delete: if isDesignatedAdmin();
+    }
+
     // Analytics Views Logs
     match /views_log/{viewId} {
       allow create, update: if true; // Public can log views and update reading duration / scroll depth
       allow read: if true; // Authors & contributors can fetch telemetry
       allow delete: if isDesignatedAdmin();
+    }
+
+    // Resonant Quotes & Text Interaction Telemetry (Zero PII)
+    match /resonant_quote_interactions/{interactionId} {
+      allow create: if true; // Public readers can submit anonymous interaction events
+      allow read: if true; // Analytics dashboard reads telemetry
+      allow update, delete: if isDesignatedAdmin();
     }
 
     // Active Reader Sessions (Live Presence Heartbeat)

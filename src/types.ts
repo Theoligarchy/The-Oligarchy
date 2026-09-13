@@ -217,6 +217,43 @@ export interface SiteSettings {
   updatedAt?: number;
 }
 
+export type ReaderClassification = 'bouncer_skimmer' | 'engaged_browser' | 'deep_reader';
+
+export type SignupLocation = 'in-article' | 'homepage' | 'footer' | 'drawer' | 'modal' | 'unknown';
+export type SubscriptionStatus = 'submitted' | 'confirmed' | 'failed';
+
+export interface ConversionEvent {
+  id?: string;
+  eventType: 'newsletter_signup';
+  visitorId: string;
+  sessionId: string;
+  firstTouchArticleId: string | null;
+  firstTouchArticleTitle: string | null;
+  lastTouchArticleId: string | null;
+  lastTouchArticleTitle: string | null;
+  conversionArticleId: string | null;
+  conversionArticleTitle: string | null;
+  signupLocation: SignupLocation;
+  referrer: string;
+  timestamp: number;
+  attributionWindowDays: number; // default: 7 days
+  subscriptionStatus: SubscriptionStatus;
+}
+
+export interface ArticleAttributionBreakdown {
+  articleId: string;
+  articleTitle: string;
+  category: string;
+  firstTouchCount: number;
+  lastTouchCount: number;
+  directConversionCount: number;
+  totalTouchpoints: number;
+  totalViews: number;
+  totalDeepReads: number;
+  conversionRatePerThousandViews: number;
+  conversionRatePerThousandReads: number;
+}
+
 export interface ViewLog {
   id?: string;
   articleId: string;
@@ -231,7 +268,11 @@ export interface ViewLog {
   userAgent?: string;
   referrer?: string;
   readDurationSeconds?: number;
+  activeReadingSeconds?: number;
   scrollDepthPercent?: number;
+  maxScrollDepth?: number;
+  classification?: ReaderClassification | null;
+  milestones?: number[]; // [25, 50, 75, 90, 100]
   authorId?: string;
   authorEmail?: string;
 }
@@ -352,6 +393,120 @@ export interface SavedArticle {
   personalNote?: string;
   pdfLink?: string;
   slug?: string;
+}
+
+// ══════════════════════════════════════════════════════════════
+// RESONANT QUOTES & TEXT INTERACTION TELEMETRY TYPES
+// (Zero-PII Signals of Attention & Text Interaction)
+// ══════════════════════════════════════════════════════════════
+
+export type ResonantInteractionType = 'highlight' | 'copy';
+
+export interface ResonantQuoteEvent {
+  id?: string;
+  eventType: 'resonant_quote_interaction';
+  articleId: string;
+  articleTitle?: string;
+  category?: string;
+  seriesName?: string;
+  contentBlockId: string;
+  interactionType: ResonantInteractionType;
+  sessionId: string;
+  anonymousVisitorId: string;
+  timestamp: number;
+  pageVersion: string;
+}
+
+export interface ParagraphResonanceStats {
+  contentBlockId: string;
+  articleId: string;
+  articleTitle: string;
+  category: string;
+  seriesName?: string;
+  paragraphText: string;
+  paragraphIndex: number;
+  tagName: string;
+  highlightCount: number;
+  copyCount: number;
+  totalInteractions: number;
+  uniqueSessionCount: number;
+  meaningfulArticleSessions: number;
+  resonanceRate: number; // (uniqueSessionCount / meaningfulArticleSessions) * 100
+}
+
+export interface ArticleResonanceSummary {
+  articleId: string;
+  articleTitle: string;
+  category: string;
+  seriesName?: string;
+  highlightCount: number;
+  copyCount: number;
+  totalInteractions: number;
+  uniqueSessions: number;
+  meaningfulSessions: number;
+  resonanceRate: number;
+  topParagraphId?: string;
+}
+
+export interface CategoryResonanceSummary {
+  category: string;
+  totalInteractions: number;
+  highlightCount: number;
+  copyCount: number;
+  uniqueSessions: number;
+  articleCount: number;
+}
+
+export interface SeriesResonanceSummary {
+  seriesName: string;
+  totalInteractions: number;
+  highlightCount: number;
+  copyCount: number;
+  uniqueSessions: number;
+  articleCount: number;
+}
+
+// ══════════════════════════════════════════════════════════════
+// SCALABLE DAILY ROLL-UP ANALYTICS (GLOBAL & PER-ARTICLE)
+// ══════════════════════════════════════════════════════════════
+
+export interface DailyGlobalStats {
+  id?: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD
+  totalViews: number;
+  uniqueVisitors: number;
+  totalActiveSeconds: number;
+  durationSampleCount: number;
+  bouncers: number;
+  engagedBrowsers: number;
+  deepReaders: number;
+  completedReads: number;
+  totalScrollDepth: number;
+  newsletterSignups: number;
+  textInteractions: number;
+  updatedAt?: any; // Firestore server timestamp or epoch ms
+  rebuiltAt?: number;
+}
+
+export interface DailyArticleStats {
+  id?: string; // YYYY-MM-DD_articleId
+  date: string; // YYYY-MM-DD
+  articleId: string;
+  articleTitle?: string;
+  category?: string;
+  totalViews: number;
+  uniqueVisitors: number;
+  totalActiveSeconds: number;
+  durationSampleCount: number;
+  bouncers: number;
+  engagedBrowsers: number;
+  deepReaders: number;
+  completedReads?: number;
+  highlightInteractions: number;
+  copyInteractions: number;
+  attributedNewsletterSignups: number;
+  updatedAt?: any; // Firestore server timestamp or epoch ms
+  rebuiltAt?: number;
 }
 
 

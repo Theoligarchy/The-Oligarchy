@@ -6,22 +6,34 @@ import {
   setDoc,
   deleteDoc,
   updateDoc,
-  getDocs,
-  query,
-  where,
   onSnapshot,
   Unsubscribe
 } from 'firebase/firestore';
-import { Article } from '../types';
+import { Article, ReaderClassification } from '../types';
 import { sanitizeFirestoreData } from './firestoreSanitizer';
+import { 
+  classifyReaderSession, 
+  MILESTONE_LEVELS 
+} from './readerClassification';
+import { recordArticleJourneyStep } from './attributionTracker';
 
 // Storage keys
 const VISITOR_ID_KEY = 'tol_visitor_id';
 const LAST_VISIT_KEY = 'tol_last_visit_time';
 const SESSION_ID_KEY = 'tol_session_id';
+const ACTIVE_TAB_COORDINATOR_KEY = 'tol_active_reading_tab';
+
+// Inactivity threshold: 35 seconds without any user input pauses the active reading timer
+const INACTIVITY_TIMEOUT_MS = 35000;
+
+// Unique tab session ID for this browser tab instance
+const TAB_INSTANCE_ID = typeof window !== 'undefined' 
+  ? 'tab_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7)
+  : 'server_tab';
 
 /**
  * Get or create a persistent anonymous visitor ID
+ * Uses anonymous UUID generation. No PII, cookies, or IP addresses collected.
  */
 export function getOrCreateVisitorId(): { visitorId: string; isReturning: boolean } {
   if (typeof window === 'undefined') {
@@ -97,41 +109,292 @@ export interface ActiveSessionRecord {
   deviceType: 'desktop' | 'mobile' | 'tablet';
   browser: string;
   referrer: string;
+  readDurationSeconds?: number;
+  scrollDepthPercent?: number;
+  classification?: ReaderClassification | null;
 }
 
+// Global active session state
 let activeHeartbeatInterval: number | null = null;
+let activeSecondTickerInterval: number | null = null;
 let currentViewDocId: string | null = null;
-let currentSessionStartTime: number = Date.now();
-let maxScrollDepth: number = 0;
+let currentActiveSession: ActiveSessionRecord | null = null;
+
+// Telemetry counters for the current article
+let currentActiveReadingSeconds = 0;
+let currentMaxScrollDepth = 0;
+const reachedMilestones = new Set<number>();
+let isCurrentArticleSession = false;
+let lastUserActivityTime = Date.now();
+let lastSyncTimestamp = 0;
+let syncDebounceTimeout: number | null = null;
 
 /**
- * Initialize page scroll tracking for the active view
+ * Mark user activity (keyboard, mouse, touch, scroll)
+ * Resumes active reading time calculation if tab is focused
  */
-export function setupScrollTracker(onDepthChange?: (depth: number) => void) {
+function recordUserActivity() {
+  lastUserActivityTime = Date.now();
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(ACTIVE_TAB_COORDINATOR_KEY, TAB_INSTANCE_ID);
+    } catch {}
+  }
+}
+
+// Global interaction listeners
+if (typeof window !== 'undefined') {
+  const activityEvents = ['scroll', 'mousemove', 'mousedown', 'keydown', 'click', 'touchstart', 'touchmove', 'pointerdown', 'wheel'];
+  activityEvents.forEach(evt => {
+    window.addEventListener(evt, recordUserActivity, { passive: true });
+  });
+
+  // Handle visibility changes
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      // Immediately flush current metrics when reader switches away
+      syncSessionTelemetry(true);
+    } else {
+      recordUserActivity();
+    }
+  });
+
+  // Handle window focus/blur for multi-tab coordination
+  window.addEventListener('focus', () => {
+    recordUserActivity();
+  });
+}
+
+/**
+ * Synchronize the current reading metrics to Firestore
+ */
+async function syncSessionTelemetry(forceImmediate: boolean = false) {
+  if (!currentViewDocId && !currentActiveSession) return;
+
+  const now = Date.now();
+  // Throttle updates to at most once every 5 seconds unless forced
+  if (!forceImmediate && now - lastSyncTimestamp < 5000) {
+    if (!syncDebounceTimeout) {
+      syncDebounceTimeout = window.setTimeout(() => {
+        syncDebounceTimeout = null;
+        syncSessionTelemetry(true);
+      }, 5000);
+    }
+    return;
+  }
+  lastSyncTimestamp = now;
+
+  const classification = isCurrentArticleSession 
+    ? classifyReaderSession(currentActiveReadingSeconds, currentMaxScrollDepth)
+    : null;
+
+  const milestonesArray = Array.from(reachedMilestones).sort((a, b) => a - b);
+
+  // 1. Update views_log entry
+  if (currentViewDocId) {
+    try {
+      const viewDocRef = doc(db, 'views_log', currentViewDocId);
+      await updateDoc(viewDocRef, sanitizeFirestoreData({
+        readDurationSeconds: currentActiveReadingSeconds,
+        activeReadingSeconds: currentActiveReadingSeconds,
+        scrollDepthPercent: currentMaxScrollDepth,
+        maxScrollDepth: currentMaxScrollDepth,
+        classification,
+        milestones: milestonesArray,
+        updatedAt: now
+      }));
+    } catch {
+      // Non-blocking catch for offline/network hiccups
+    }
+  }
+
+  // 2. Update active_sessions heartbeat
+  if (currentActiveSession) {
+    try {
+      const sessionDocRef = doc(db, 'active_sessions', currentActiveSession.sessionId);
+      await setDoc(sessionDocRef, sanitizeFirestoreData({
+        ...currentActiveSession,
+        lastActive: now,
+        readDurationSeconds: currentActiveReadingSeconds,
+        scrollDepthPercent: currentMaxScrollDepth,
+        classification
+      }), { merge: true });
+    } catch {
+      // Non-blocking
+    }
+  }
+}
+
+/**
+ * Start 1-second interval ticker that strictly accumulates active reading time
+ * Criteria:
+ * - Document must be visible (document.visibilityState === 'visible')
+ * - Window must have focus (document.hasFocus())
+ * - This tab must be the active tab in localStorage
+ * - User must have interacted within the last 35 seconds
+ */
+function startActiveSecondsTicker() {
+  if (activeSecondTickerInterval) {
+    clearInterval(activeSecondTickerInterval);
+  }
+
+  activeSecondTickerInterval = window.setInterval(() => {
+    if (typeof document === 'undefined') return;
+
+    // Check 1: Tab visibility
+    if (document.visibilityState === 'hidden') {
+      return;
+    }
+
+    // Check 2: Window focus
+    if (!document.hasFocus()) {
+      return;
+    }
+
+    // Check 3: Multi-tab coordination - only the active tab counts
+    try {
+      const activeTabId = localStorage.getItem(ACTIVE_TAB_COORDINATOR_KEY);
+      if (activeTabId && activeTabId !== TAB_INSTANCE_ID) {
+        return;
+      }
+    } catch {}
+
+    // Check 4: User activity timeout (inactivity threshold)
+    const timeSinceLastActivity = Date.now() - lastUserActivityTime;
+    if (timeSinceLastActivity > INACTIVITY_TIMEOUT_MS) {
+      return;
+    }
+
+    // Only count active reading seconds for article views
+    if (!isCurrentArticleSession) {
+      return;
+    }
+
+    // Increment confirmed active reading seconds
+    currentActiveReadingSeconds++;
+  }, 1000);
+}
+
+/**
+ * Calculate container-specific scroll progress for an article
+ * Ignores site navigation, headers, commentary, and footers
+ */
+export function calculateArticleScrollProgress(containerEl: HTMLElement): number {
+  if (!containerEl) return 0;
+
+  const rect = containerEl.getBoundingClientRect();
+  const windowHeight = window.innerHeight || document.documentElement.clientHeight;
+  const containerHeight = containerEl.offsetHeight || containerEl.scrollHeight;
+
+  if (containerHeight <= 0) return 0;
+
+  // If container hasn't entered viewport yet
+  if (rect.top >= windowHeight) {
+    return 0;
+  }
+
+  // Reading horizon is ~75% of viewport height (natural reading eye focal plane)
+  const readingFocalY = windowHeight * 0.75;
+  const pixelsScrolledIntoContainer = readingFocalY - rect.top;
+
+  if (pixelsScrolledIntoContainer <= 0) {
+    return 0;
+  }
+
+  // If the bottom of the article has entered the viewport reading horizon
+  if (rect.bottom <= windowHeight) {
+    return 100;
+  }
+
+  const rawPercent = Math.round((pixelsScrolledIntoContainer / containerHeight) * 100);
+  return Math.min(100, Math.max(0, rawPercent));
+}
+
+/**
+ * Initialize container-specific scroll tracker for research articles
+ * Listens for scroll events, checks milestone boundaries [25, 50, 75, 90, 100],
+ * and throttles updates to prevent excessive events.
+ */
+export function setupArticleScrollTracker(
+  containerIdOrSelector: string = 'article-body-content',
+  onDepthChange?: (depth: number, milestones: number[]) => void
+): () => void {
   if (typeof window === 'undefined') return () => {};
 
-  maxScrollDepth = 0;
+  let ticking = false;
 
-  const handleScroll = () => {
-    const scrollTop = window.scrollY || document.documentElement.scrollTop;
-    const scrollHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-    if (scrollHeight > 0) {
-      const currentDepth = Math.min(100, Math.round((scrollTop / scrollHeight) * 100));
-      if (currentDepth > maxScrollDepth) {
-        maxScrollDepth = currentDepth;
-        if (onDepthChange) onDepthChange(maxScrollDepth);
+  const checkScroll = () => {
+    ticking = false;
+    let container = document.getElementById(containerIdOrSelector);
+    if (!container) {
+      container = document.querySelector('.article-content') || document.querySelector('article');
+    }
+
+    let currentDepth = 0;
+    if (container) {
+      currentDepth = calculateArticleScrollProgress(container as HTMLElement);
+    } else {
+      // Fallback if no container is found
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+      if (scrollHeight > 0) {
+        currentDepth = Math.min(100, Math.round((scrollTop / scrollHeight) * 100));
+      }
+    }
+
+    if (currentDepth > currentMaxScrollDepth) {
+      currentMaxScrollDepth = currentDepth;
+
+      // Check milestones [25, 50, 75, 90, 100]
+      let newMilestoneReached = false;
+      MILESTONE_LEVELS.forEach(milestone => {
+        if (currentMaxScrollDepth >= milestone && !reachedMilestones.has(milestone)) {
+          reachedMilestones.add(milestone);
+          newMilestoneReached = true;
+        }
+      });
+
+      if (onDepthChange) {
+        onDepthChange(currentMaxScrollDepth, Array.from(reachedMilestones));
+      }
+
+      // If a milestone was crossed, sync telemetry
+      if (newMilestoneReached) {
+        syncSessionTelemetry(false);
       }
     }
   };
 
+  const handleScroll = () => {
+    if (!ticking) {
+      window.requestAnimationFrame(checkScroll);
+      ticking = true;
+    }
+  };
+
+  // Initial check after render
+  window.setTimeout(checkScroll, 300);
+
   window.addEventListener('scroll', handleScroll, { passive: true });
+  window.addEventListener('resize', handleScroll, { passive: true });
+
   return () => {
     window.removeEventListener('scroll', handleScroll);
+    window.removeEventListener('resize', handleScroll);
   };
 }
 
 /**
- * Log a genuine page or article view event to Firestore views_log
+ * Backward-compatible general scroll tracker
+ */
+export function setupScrollTracker(onDepthChange?: (depth: number) => void) {
+  return setupArticleScrollTracker('article-body-content', (depth) => {
+    if (onDepthChange) onDepthChange(depth);
+  });
+}
+
+/**
+ * Track a page or article view event to Firestore views_log
  */
 export async function trackPageView(
   page: string,
@@ -139,13 +402,31 @@ export async function trackPageView(
 ): Promise<string | null> {
   if (typeof window === 'undefined') return null;
 
+  // Flush any prior session metrics
+  await syncSessionTelemetry(true);
+
   const { visitorId, isReturning } = getOrCreateVisitorId();
   const sessionId = getOrCreateSessionId();
   const deviceType = detectDeviceType();
   const browser = detectBrowser();
   const now = Date.now();
-  currentSessionStartTime = now;
-  maxScrollDepth = 0;
+
+  // Reset telemetry state for new article/view
+  currentActiveReadingSeconds = 0;
+  currentMaxScrollDepth = 0;
+  reachedMilestones.clear();
+  isCurrentArticleSession = Boolean(article && article.id);
+  lastUserActivityTime = now;
+
+  // Mark this tab as active coordinator
+  try {
+    localStorage.setItem(ACTIVE_TAB_COORDINATOR_KEY, TAB_INSTANCE_ID);
+  } catch {}
+
+  // Record article journey step for 7-day conversion attribution
+  if (article && article.id && !article.id.startsWith('page-')) {
+    recordArticleJourneyStep(article.id, article.title, article.category);
+  }
 
   const viewData: Record<string, any> = {
     articleId: article ? article.id : `page-${page}`,
@@ -160,7 +441,11 @@ export async function trackPageView(
     userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
     referrer: typeof document !== 'undefined' ? (document.referrer || 'direct') : 'direct',
     readDurationSeconds: 0,
-    scrollDepthPercent: 0
+    activeReadingSeconds: 0,
+    scrollDepthPercent: 0,
+    maxScrollDepth: 0,
+    classification: null,
+    milestones: []
   };
 
   if (article?.authorId) {
@@ -184,12 +469,17 @@ export async function trackPageView(
       lastActive: now,
       deviceType,
       browser,
-      referrer: typeof document !== 'undefined' ? (document.referrer || 'direct') : 'direct'
+      referrer: typeof document !== 'undefined' ? (document.referrer || 'direct') : 'direct',
+      readDurationSeconds: 0,
+      scrollDepthPercent: 0,
+      classification: null
     };
     if (article?.id) sessionPayload.articleId = article.id;
     if (article?.title) sessionPayload.articleTitle = article.title;
 
+    currentActiveSession = sessionPayload;
     startActiveHeartbeat(sessionPayload);
+    startActiveSecondsTicker();
 
     return docRef.id;
   } catch (err) {
@@ -206,51 +496,28 @@ export function startActiveHeartbeat(session: ActiveSessionRecord) {
     clearInterval(activeHeartbeatInterval);
     activeHeartbeatInterval = null;
   }
+  currentActiveSession = session;
 
   const sendHeartbeat = async () => {
-    // Only send heartbeat if document is visible
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-      return;
-    }
-
-    const elapsedSeconds = Math.max(1, Math.round((Date.now() - currentSessionStartTime) / 1000));
-    
-    try {
-      // 1. Update active session doc
-      const sessionDocRef = doc(db, 'active_sessions', session.sessionId);
-      await setDoc(sessionDocRef, sanitizeFirestoreData({
-        ...session,
-        lastActive: Date.now(),
-        readDurationSeconds: elapsedSeconds,
-        scrollDepthPercent: maxScrollDepth
-      }), { merge: true });
-
-      // 2. Incrementally update read duration on the view log doc
-      if (currentViewDocId) {
-        const viewDocRef = doc(db, 'views_log', currentViewDocId);
-        await updateDoc(viewDocRef, sanitizeFirestoreData({
-          readDurationSeconds: elapsedSeconds,
-          scrollDepthPercent: maxScrollDepth
-        }));
-      }
-    } catch {
-      // Silent catch for network drops
-    }
+    syncSessionTelemetry(false);
   };
 
   // Immediate first heartbeat
   sendHeartbeat();
 
-  // Pulse every 20 seconds
-  activeHeartbeatInterval = window.setInterval(sendHeartbeat, 20000);
+  // Pulse every 15 seconds to keep active presence fresh and sync metrics
+  activeHeartbeatInterval = window.setInterval(sendHeartbeat, 15000);
 
   // Clean up session on window unload
   if (typeof window !== 'undefined') {
     const cleanupSession = () => {
-      try {
-        const sessionDocRef = doc(db, 'active_sessions', session.sessionId);
-        deleteDoc(sessionDocRef).catch(() => {});
-      } catch {}
+      syncSessionTelemetry(true);
+      if (session.sessionId) {
+        try {
+          const sessionDocRef = doc(db, 'active_sessions', session.sessionId);
+          deleteDoc(sessionDocRef).catch(() => {});
+        } catch {}
+      }
     };
 
     window.addEventListener('beforeunload', cleanupSession, { once: true });
@@ -262,10 +529,18 @@ export function startActiveHeartbeat(session: ActiveSessionRecord) {
  * End current active session cleanly (e.g. when navigating away)
  */
 export function stopActiveHeartbeat() {
+  syncSessionTelemetry(true);
+
   if (activeHeartbeatInterval) {
     clearInterval(activeHeartbeatInterval);
     activeHeartbeatInterval = null;
   }
+  if (activeSecondTickerInterval) {
+    clearInterval(activeSecondTickerInterval);
+    activeSecondTickerInterval = null;
+  }
+
+  isCurrentArticleSession = false;
 
   const sessionId = sessionStorage.getItem(SESSION_ID_KEY);
   if (sessionId) {
@@ -274,6 +549,8 @@ export function stopActiveHeartbeat() {
       deleteDoc(sessionDocRef).catch(() => {});
     } catch {}
   }
+  currentActiveSession = null;
+  currentViewDocId = null;
 }
 
 /**
@@ -284,7 +561,7 @@ export function subscribeToLiveActiveVisitors(
   onUpdate: (activeCount: number, activeSessions: ActiveSessionRecord[]) => void
 ): Unsubscribe {
   const sessionsCol = collection(db, 'active_sessions');
-  
+
   const unsubscribe = onSnapshot(sessionsCol, (snapshot) => {
     const now = Date.now();
     const threshold = now - 45000; // 45 seconds timeout for active reader presence

@@ -1,11 +1,12 @@
-import React from 'react';
-import { Instagram, Twitter, Linkedin, Mail } from 'lucide-react';
-import { SiteSettings } from '../types';
+import React, { useState } from 'react';
+import { Instagram, Twitter, Linkedin, Mail, CheckCircle2, Send } from 'lucide-react';
+import { SiteSettings, SignupLocation } from '../types';
 
 interface FooterProps {
   setActiveTab: (tab: string) => void;
   setCategoryFilter: (filter: string) => void;
   siteSettings?: SiteSettings;
+  onSubscribe?: (email: string, location: SignupLocation) => Promise<boolean>;
 }
 
 export const DEFAULT_SOCIAL_LINKS = {
@@ -18,7 +19,11 @@ export const DEFAULT_SOCIAL_LINKS = {
 
 export const SOCIAL_LINKS = DEFAULT_SOCIAL_LINKS;
 
-export default function Footer({ setActiveTab, setCategoryFilter, siteSettings }: FooterProps) {
+export default function Footer({ setActiveTab, setCategoryFilter, siteSettings, onSubscribe }: FooterProps) {
+  const [footerEmail, setFooterEmail] = useState('');
+  const [footerSuccess, setFooterSuccess] = useState(false);
+  const [footerSubmitting, setFooterSubmitting] = useState(false);
+
   const socials = siteSettings?.socials || DEFAULT_SOCIAL_LINKS;
   const footerDesc = siteSettings?.footerDescription || 'Independent research platform. Free of corporate sponsorship, commercial agendas, and attention-seeking headlines. Powered strictly by empirical research and critical inquiry.';
   const copyright = siteSettings?.copyrightText || 'THE OLIGARCHY. ALL RIGHTS RESERVED.';
@@ -196,6 +201,56 @@ export default function Footer({ setActiveTab, setCategoryFilter, siteSettings }
               </span>
             </li>
           </ul>
+
+          {/* Footer Dispatch Signup */}
+          {onSubscribe && (
+            <div className="mt-4 pt-3 border-t border-paper/10">
+              <span className="block font-sans text-[10px] uppercase tracking-wider text-paper/40 mb-1.5">
+                Research Dispatch
+              </span>
+              {footerSuccess ? (
+                <div className="flex items-center gap-1.5 text-[#8bc4a8] text-xs font-serif">
+                  <CheckCircle2 size={13} />
+                  <span>Subscribed</span>
+                </div>
+              ) : (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!footerEmail.trim() || footerSubmitting) return;
+                    setFooterSubmitting(true);
+                    try {
+                      const ok = await onSubscribe(footerEmail.trim(), 'footer');
+                      if (ok) {
+                        setFooterEmail('');
+                        setFooterSuccess(true);
+                        setTimeout(() => setFooterSuccess(false), 6000);
+                      }
+                    } finally {
+                      setFooterSubmitting(false);
+                    }
+                  }}
+                  className="flex items-center gap-1"
+                >
+                  <input
+                    type="email"
+                    placeholder="scholar@domain.edu"
+                    value={footerEmail}
+                    onChange={(e) => setFooterEmail(e.target.value)}
+                    className="bg-midnight border border-paper/15 text-paper text-xs px-2 py-1 rounded-xs flex-1 min-w-0 focus:outline-none focus:border-blood font-serif placeholder-paper/20"
+                  />
+                  <button
+                    type="submit"
+                    disabled={footerSubmitting}
+                    className="bg-blood/80 hover:bg-blood text-paper px-2 py-1 rounded-xs text-xs font-sans uppercase tracking-wider cursor-pointer shrink-0 disabled:opacity-50"
+                    title="Subscribe to research dispatch"
+                  >
+                    <Send size={11} />
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
