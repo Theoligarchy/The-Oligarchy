@@ -13,7 +13,7 @@ import {
   increment
 } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Article, ReadingItem, AuthorProfile, SavedArticle, SiteSettings, SignupLocation } from './types';
+import { Article, ReadingItem, AuthorProfile, SavedArticle, SiteSettings, SignupLocation, EditorialUser } from './types';
 import { fetchSiteSettings, getCachedSiteSettings, DEFAULT_SITE_SETTINGS } from './utils/siteSettings';
 import { trackNewsletterConversion } from './utils/attributionTracker';
 import { getOrCreateVisitorId, getOrCreateSessionId } from './utils/analyticsTracker';
@@ -116,13 +116,21 @@ export default function App() {
   const [savedArticles, setSavedArticles] = useState<SavedArticle[]>([]);
   const [contributors, setContributors] = useState<AuthorProfile[]>([]);
   const [adminUser, setAdminUser] = useState<User | null>(null);
+  const [activeEditorialUser, setActiveEditorialUser] = useState<EditorialUser | null>(() => {
+    try {
+      const cached = localStorage.getItem('tol_editorial_session');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
 
-  // Strict administrator authorization: verify user.email against the authorized email address
-  // rather than relying merely on the existence of a Firebase User object
+  // Strict administrator & registered editorial scholar authorization
   const isAuthorizedAdmin = Boolean(
-    adminUser &&
+    (adminUser &&
     adminUser.email &&
-    adminUser.email.toLowerCase().trim() === AUTHORIZED_ADMIN_EMAIL.toLowerCase()
+    adminUser.email.toLowerCase().trim() === AUTHORIZED_ADMIN_EMAIL.toLowerCase()) ||
+    (activeEditorialUser && activeEditorialUser.email && activeEditorialUser.status !== 'suspended')
   );
 
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => getCachedSiteSettings());
@@ -1600,10 +1608,14 @@ export default function App() {
               <AdminDashboard 
                 onLogout={() => {
                   auth.signOut().catch(console.error);
+                  localStorage.removeItem('tol_editorial_session');
+                  localStorage.removeItem('tol_simulated_role');
                   setAdminUser(null);
+                  setActiveEditorialUser(null);
                 }} 
                 allArticles={articles}
                 refreshArticles={loadData}
+                editorialUser={activeEditorialUser}
               />
             ) : (
               <div className="py-12">
@@ -1616,13 +1628,19 @@ export default function App() {
                   </button>
                 </div>
                 <AdminLogin 
-                  onLoginSuccess={(user) => {
-                    if (user && user.email && user.email.toLowerCase().trim() === AUTHORIZED_ADMIN_EMAIL.toLowerCase()) {
-                      setAdminUser(user);
-                    } else {
-                      console.warn(`Unauthorized login attempt by: ${user?.email}. Rejecting.`);
-                      auth.signOut().catch(console.error);
-                      setAdminUser(null);
+                  onLoginSuccess={(user, role, editorialMember) => {
+                    setAdminUser(user);
+                    if (editorialMember) {
+                      setActiveEditorialUser(editorialMember);
+                    } else if (user.email?.toLowerCase().trim() === AUTHORIZED_ADMIN_EMAIL.toLowerCase()) {
+                      setActiveEditorialUser({
+                        uid: user.uid,
+                        email: AUTHORIZED_ADMIN_EMAIL,
+                        displayName: 'Priyasha Priyal Jena',
+                        role: 'admin',
+                        authorId: 'priyasha-priyal-jena',
+                        status: 'active'
+                      });
                     }
                   }} 
                 />

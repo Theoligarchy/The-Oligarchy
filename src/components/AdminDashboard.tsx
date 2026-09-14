@@ -105,19 +105,39 @@ interface AdminDashboardProps {
   allArticles: Article[];
   refreshArticles: () => Promise<void>;
   user?: any;
+  editorialUser?: EditorialUser | null;
 }
 
-export default function AdminDashboard({ onLogout, allArticles, refreshArticles }: AdminDashboardProps) {
+export default function AdminDashboard({ onLogout, allArticles, refreshArticles, editorialUser }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<'write' | 'articles' | 'authors' | 'pitches' | 'tips' | 'reading' | 'analytics' | 'settings' | 'subscribers' | 'discourse' | 'team' | 'contributor_dashboard'>('write');
   
   // Editorial RBAC & Persona Simulation States
-  const [currentUser, setCurrentUser] = useState<EditorialUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<EditorialUser | null>(() => {
+    if (editorialUser) return editorialUser;
+    try {
+      const cached = localStorage.getItem('tol_editorial_session');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
   const [simulatedRole, setSimulatedRole] = useState<EditorialRole | null>(() => {
     return (localStorage.getItem('tol_simulated_role') as EditorialRole) || null;
   });
 
-  const effectiveRole: EditorialRole = simulatedRole || currentUser?.role || 'admin';
+  const isRealAdmin = currentUser?.role === 'admin' || (!currentUser && auth.currentUser?.email?.toLowerCase() === 'theoligarchy.ppj@gmail.com');
+  const effectiveRole: EditorialRole = (isRealAdmin ? simulatedRole : null) || currentUser?.role || 'author';
   const roleMeta = ROLE_LABELS[effectiveRole] || ROLE_LABELS.admin;
+
+  // Enforce tab access restrictions for Author / Guest Researcher role
+  useEffect(() => {
+    if (effectiveRole === 'author') {
+      const allowedAuthorTabs = ['contributor_dashboard', 'write', 'articles', 'pitches'];
+      if (!allowedAuthorTabs.includes(activeTab)) {
+        setActiveTab('write');
+      }
+    }
+  }, [activeTab, effectiveRole]);
 
   // Registered Contributors & Authors List
   const [contributors, setContributors] = useState<AuthorProfile[]>([]);
@@ -251,12 +271,21 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   useEffect(() => {
     // Resolve current editorial user and role
     const initRole = async () => {
-      const authUser = auth.currentUser || { email: 'theoligarchy.ppj@gmail.com', uid: 'founder-priyasha' };
+      let targetUser = editorialUser || currentUser;
+      if (!targetUser) {
+        try {
+          const stored = localStorage.getItem('tol_editorial_session');
+          if (stored) targetUser = JSON.parse(stored);
+        } catch (e) {}
+      }
+
+      const authUser = targetUser || auth.currentUser || { email: 'theoligarchy.ppj@gmail.com', uid: 'founder-priyasha' };
       const resolved = await resolveEditorialUser(authUser);
       setCurrentUser(resolved);
       
       // Prefill author fields if author
       if (resolved.role === 'author') {
+        setActiveTab('write');
         setAuthorName(resolved.displayName || 'Scholar Contributor');
         setAuthorId(resolved.authorId || 'scholar-contributor');
         if (resolved.orcid) setAuthorOrcid(resolved.orcid);
@@ -1478,6 +1507,8 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
   const handleSignOutAction = async () => {
     try {
       localStorage.removeItem('local_admin_session');
+      localStorage.removeItem('tol_editorial_session');
+      localStorage.removeItem('tol_simulated_role');
       await signOut(auth);
       onLogout();
     } catch (e) {
@@ -1576,30 +1607,32 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles 
 
             {/* Persona Simulator & Quick Actions */}
             <div className="flex flex-wrap items-center gap-3">
-              {/* Interactive Role Switcher for seamless testing */}
-              <div className="flex items-center gap-1 bg-ink border border-paper/15 p-1 rounded-sm shadow-xs">
-                <span className="font-sans text-[8px] font-bold uppercase tracking-wider text-paper/40 px-1.5 flex items-center gap-1">
-                  <ShieldCheck size={10} className="text-blood" />
-                  Role View:
-                </span>
-                {(['admin', 'reviewer', 'author'] as EditorialRole[]).map((r) => {
-                  const isCurrent = effectiveRole === r;
-                  return (
-                    <button
-                      key={r}
-                      onClick={() => handleSwitchSimulatedRole(r === currentUser?.role ? null : r)}
-                      className={`font-sans text-[8px] font-bold uppercase tracking-wider px-2 py-1 rounded-xs transition-all cursor-pointer ${
-                        isCurrent 
-                          ? 'bg-blood text-paper shadow-xs' 
-                          : 'text-paper/40 hover:text-paper hover:bg-paper/5'
-                      }`}
-                      title={`Preview workspace with ${ROLE_LABELS[r].title} permissions`}
-                    >
-                      {r === 'admin' ? 'Managing Editor' : r === 'reviewer' ? 'Peer Reviewer' : 'Guest Researcher'}
-                    </button>
-                  );
-                })}
-              </div>
+              {/* Interactive Role Switcher for seamless testing: Only available to Managing Editor */}
+              {isRealAdmin && (
+                <div className="flex items-center gap-1 bg-ink border border-paper/15 p-1 rounded-sm shadow-xs">
+                  <span className="font-sans text-[8px] font-bold uppercase tracking-wider text-paper/40 px-1.5 flex items-center gap-1">
+                    <ShieldCheck size={10} className="text-blood" />
+                    Role View:
+                  </span>
+                  {(['admin', 'reviewer', 'author'] as EditorialRole[]).map((r) => {
+                    const isCurrent = effectiveRole === r;
+                    return (
+                      <button
+                        key={r}
+                        onClick={() => handleSwitchSimulatedRole(r === currentUser?.role ? null : r)}
+                        className={`font-sans text-[8px] font-bold uppercase tracking-wider px-2 py-1 rounded-xs transition-all cursor-pointer ${
+                          isCurrent 
+                            ? 'bg-blood text-paper shadow-xs' 
+                            : 'text-paper/40 hover:text-paper hover:bg-paper/5'
+                        }`}
+                        title={`Preview workspace with ${ROLE_LABELS[r].title} permissions`}
+                      >
+                        {r === 'admin' ? 'Managing Editor' : r === 'reviewer' ? 'Peer Reviewer' : 'Guest Researcher'}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {autoSaveActive && (
                 <span className="font-serif text-[10px] italic text-[#8bc4a8] bg-[#8bc4a8]/5 border border-[#8bc4a8]/10 px-2 py-1 rounded-sm flex items-center gap-1">

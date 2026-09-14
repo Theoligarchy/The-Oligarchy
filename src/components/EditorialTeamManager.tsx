@@ -25,6 +25,7 @@ import {
   HelpCircle,
   ExternalLink,
   Shield,
+  ShieldAlert,
   Eye,
   RefreshCw
 } from 'lucide-react';
@@ -270,6 +271,21 @@ export default function EditorialTeamManager({
             </div>
           );
         })}
+      </div>
+
+      {/* Author & Editorial Staff Access Instructions */}
+      <div className="bg-blood/5 border border-blood/20 p-4 rounded-sm flex items-start gap-3.5">
+        <div className="w-8 h-8 rounded-full bg-blood/10 border border-blood/30 flex items-center justify-center text-blood shrink-0 mt-0.5">
+          <ShieldAlert size={16} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <h4 className="font-display text-sm font-bold text-paper/95">
+            How Author &amp; Staff Access Works
+          </h4>
+          <p className="font-serif text-xs text-paper/70 leading-relaxed">
+            When you register an author or peer reviewer with their email address below, they can sign in using their own email and the editorial password. The system verifies their email in this registry and immediately opens their assigned, restricted workspace. Authors will only see their own manuscripts, pitch drafts, and scholar analytics—never administrative tabs, subscriber lists, or other authors' private work.
+          </p>
+        </div>
       </div>
 
       {/* Alert Banner */}

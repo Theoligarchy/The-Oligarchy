@@ -18,15 +18,17 @@ import {
   ArrowLeft,
   Lock
 } from 'lucide-react';
+import { fetchEditorialTeam } from '../lib/rbac';
+import { EditorialUser } from '../types';
 
 interface AdminLoginProps {
-  onLoginSuccess: (user: User) => void;
+  onLoginSuccess: (user: User, role?: string, editorialMember?: EditorialUser | null) => void;
 }
 
 const DESIGNATED_ADMIN_EMAIL = 'theoligarchy.ppj@gmail.com';
 
 export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
-  const [email, setEmail] = useState(DESIGNATED_ADMIN_EMAIL);
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   
@@ -42,13 +44,37 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
     // Purge any legacy unencrypted local admin tokens from previous sessions
     localStorage.removeItem('local_admin_session');
 
-    // Auto-login only if active Firebase Auth session belongs to the designated admin
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    // Auto-login only if active session belongs to the designated admin or a registered staff member
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        // 1. Check if an editorial team session is already cached locally
+        try {
+          const cachedSession = localStorage.getItem('tol_editorial_session');
+          if (cachedSession) {
+            const member = JSON.parse(cachedSession);
+            if (member && member.email && member.role && member.status !== 'suspended') {
+              onLoginSuccess(user, member.role, member);
+              return;
+            }
+          }
+        } catch (e) {}
+
+        // 2. If it's the designated primary admin
         if (user.email && user.email.toLowerCase() === DESIGNATED_ADMIN_EMAIL.toLowerCase()) {
-          onLoginSuccess(user);
+          onLoginSuccess(user, 'admin', null);
         } else {
-          // Immediately sign out any unauthorized user
+          // 3. Check if user.email matches a registered editorial team member
+          try {
+            const team = await fetchEditorialTeam();
+            const member = team.find(m => m.email.toLowerCase() === (user.email || '').toLowerCase());
+            if (member && member.status !== 'suspended') {
+              localStorage.setItem('tol_editorial_session', JSON.stringify(member));
+              onLoginSuccess(user, member.role, member);
+              return;
+            }
+          } catch (e) {}
+
+          // Otherwise sign out unauthorized account
           signOut(auth).catch(console.error);
         }
       }
@@ -59,9 +85,10 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim()) {
+    const inputEmail = email.trim().toLowerCase();
+    if (!inputEmail) {
       setMessageType('error');
-      setMessage('Please enter your administrator email address.');
+      setMessage('Please enter your email address.');
       return;
     }
     if (!password.trim()) {
@@ -74,20 +101,65 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
     setMessage('');
 
     try {
-      // 1. Authenticate with Firebase Authentication
-      const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
-      const user = userCredential.user;
+      // 1. Check if logging in as the primary designated administrator
+      if (inputEmail === DESIGNATED_ADMIN_EMAIL.toLowerCase()) {
+        const userCredential = await signInWithEmailAndPassword(auth, DESIGNATED_ADMIN_EMAIL, password);
+        const user = userCredential.user;
 
-      // 2. Strict authorization: Verify this is the sole authorized administrator account
-      if (user.email?.toLowerCase() === DESIGNATED_ADMIN_EMAIL.toLowerCase()) {
+        localStorage.removeItem('tol_editorial_session');
         setMessageType('success');
-        setMessage('Credentials verified. Entering administration console...');
-        onLoginSuccess(user);
-      } else {
-        // Non-designated accounts must be signed out immediately and rejected
-        await signOut(auth);
+        setMessage('Managing Editor credentials verified. Entering console...');
+        onLoginSuccess(user, 'admin', null);
+        return;
+      }
+
+      // 2. Look up the email in the Editorial Staff / Author registry
+      const team = await fetchEditorialTeam();
+      const member = team.find(m => m.email.toLowerCase() === inputEmail);
+
+      if (!member) {
         setMessageType('error');
-        setMessage('Access Denied: This account is not authorized as the editorial administrator.');
+        setMessage(`Access Denied: "${inputEmail}" is not registered in the editorial staff registry. Please contact the Managing Editor to receive access.`);
+        return;
+      }
+
+      if (member.status === 'suspended') {
+        setMessageType('error');
+        setMessage(`Access Denied: The account for "${inputEmail}" has been suspended. Please contact the Managing Editor.`);
+        return;
+      }
+
+      // 3. Verify password via Firebase Authentication:
+      // Try direct authentication first (if user has an individual Firebase Auth record),
+      // otherwise authenticate against the shared editorial credentials
+      let authenticatedUser: User | null = null;
+      try {
+        const directCred = await signInWithEmailAndPassword(auth, inputEmail, password);
+        authenticatedUser = directCred.user;
+      } catch (directErr: any) {
+        if (directErr.code === 'auth/user-not-found' || directErr.code === 'auth/invalid-credential') {
+          // Verify with the shared editorial master password
+          const masterCred = await signInWithEmailAndPassword(auth, DESIGNATED_ADMIN_EMAIL, password);
+          authenticatedUser = masterCred.user;
+        } else {
+          throw directErr;
+        }
+      }
+
+      if (authenticatedUser) {
+        // Save verified editorial session
+        localStorage.setItem('tol_editorial_session', JSON.stringify(member));
+        localStorage.removeItem('tol_simulated_role'); // Clear any role override
+
+        const roleTitle = member.role === 'author' 
+          ? 'Author / Guest Researcher' 
+          : member.role === 'reviewer' 
+          ? 'Peer Reviewer' 
+          : 'Editorial Staff';
+
+        setMessageType('success');
+        setMessage(`Welcome, ${member.displayName || inputEmail}! Verified as ${roleTitle}. Loading your workspace...`);
+        onLoginSuccess(authenticatedUser, member.role, member);
       }
     } catch (err: any) {
       console.warn('Authentication notice:', err.code, err.message);
@@ -96,7 +168,7 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
       if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
         setMessage('Access denied: Invalid email or password.');
       } else if (err.code === 'auth/user-not-found') {
-        setMessage('No administrator account found with this email.');
+        setMessage('No account found with these credentials.');
       } else if (err.code === 'auth/too-many-requests') {
         setMessage('Too many failed sign-in attempts. Please reset your password or try again later.');
       } else if (err.code === 'auth/operation-not-allowed') {
@@ -151,12 +223,12 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
             <Lock size={18} />
           </div>
           <h2 className="font-gothic text-3xl text-paper">
-            {isForgotPasswordMode ? 'Password Recovery' : 'Admin Access'}
+            {isForgotPasswordMode ? 'Password Recovery' : 'Editorial Access'}
           </h2>
           <p className="font-serif text-xs italic text-paper/40 mt-1.5">
             {isForgotPasswordMode 
               ? 'Request a secure Firebase password recovery link'
-              : 'The Oligarchy Editorial Dashboard'}
+              : 'Managing Editor, Peer Reviewer & Scholar Contributor Portal'}
           </p>
         </div>
 
@@ -185,7 +257,7 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
           <form onSubmit={handlePasswordReset} className="flex flex-col gap-5 select-text">
             <div className="flex flex-col gap-1.5">
               <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                Administrator Email Address
+                Email Address
               </label>
               <div className="relative flex items-center bg-midnight border border-paper/10 rounded-sm px-3 py-2 text-sm">
                 <Mail size={14} className="text-paper/30 mr-2.5 shrink-0" />
@@ -228,9 +300,20 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
           <form onSubmit={handleSignIn} className="flex flex-col gap-5 select-text">
             {/* Email field */}
             <div className="flex flex-col gap-1.5">
-              <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                Administrator Email
-              </label>
+              <div className="flex justify-between items-center">
+                <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                  Editorial Email
+                </label>
+                {email !== DESIGNATED_ADMIN_EMAIL && (
+                  <button
+                    type="button"
+                    onClick={() => setEmail(DESIGNATED_ADMIN_EMAIL)}
+                    className="font-sans text-[9px] uppercase tracking-wider text-paper/40 hover:text-paper hover:underline bg-none border-none p-0 cursor-pointer"
+                  >
+                    Managing Editor
+                  </button>
+                )}
+              </div>
               <div className="relative flex items-center bg-midnight border border-paper/10 rounded-sm px-3 py-2 text-sm">
                 <Mail size={14} className="text-paper/30 mr-2.5 shrink-0" />
                 <input
@@ -238,9 +321,13 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={loading}
-                  className="bg-transparent text-paper font-serif focus:outline-none w-full"
+                  placeholder="e.g. your-email@gmail.com or theoligarchy.ppj@gmail.com"
+                  className="bg-transparent text-paper font-serif focus:outline-none w-full placeholder-paper/20"
                 />
               </div>
+              <p className="font-serif text-[11px] text-paper/35">
+                Staff members and registered authors sign in here using their registered email and the editorial password.
+              </p>
             </div>
 
             {/* Password field */}
@@ -290,15 +377,18 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
               disabled={loading}
               className="bg-blood hover:bg-blood-light disabled:bg-blood/40 text-paper font-sans text-xs font-bold tracking-widest uppercase py-3.5 mt-2 transition-all cursor-pointer shadow-md rounded-sm"
             >
-              {loading ? 'Authenticating...' : 'Sign In with Password →'}
+              {loading ? 'Authenticating...' : 'Sign In to Workspace →'}
             </button>
           </form>
         )}
 
-        <div className="border-t border-paper/10 pt-4 flex gap-2 items-center justify-center text-center font-sans text-[9px] text-paper/25 tracking-wider uppercase">
-          <span>Enterprise Encryption</span>
-          <span>•</span>
-          <span>Authorized: {DESIGNATED_ADMIN_EMAIL}</span>
+        <div className="border-t border-paper/10 pt-4 flex flex-col gap-1 items-center justify-center text-center font-sans text-[9px] text-paper/30 tracking-wider">
+          <div className="flex gap-2 items-center">
+            <span>Role-Based Access Control</span>
+            <span>•</span>
+            <span>Enterprise Encryption</span>
+          </div>
+          <span className="text-[8px] text-paper/20">Authors sign in with their registered email to enter the restricted Author Workspace.</span>
         </div>
       </div>
     </div>
