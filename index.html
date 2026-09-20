@@ -2,32 +2,38 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- Prevent benign development HMR WebSocket connection errors from triggering UI popups -->
+    <!-- Prevent benign development HMR WebSocket connection errors from triggering UI popups in preview iframe -->
     <script>
       (function() {
-        if (window.location.hostname.includes('localhost') || window.location.hostname.includes('run.app') || window.location.hostname.includes('127.0.0.1')) {
-          window.addEventListener('unhandledrejection', function(event) {
-            if (event.reason && (
-              (event.reason.message && event.reason.message.includes('WebSocket')) ||
-              (event.reason.message && event.reason.message.includes('websocket')) ||
-              (event.reason.toString && event.reason.toString().includes('WebSocket')) ||
-              (event.reason.toString && event.reason.toString().includes('websocket'))
-            )) {
-              event.preventDefault();
-              event.stopPropagation();
-            }
-          }, true);
-          window.addEventListener('error', function(event) {
-            if (event.message && (
-              event.message.includes('WebSocket') || 
-              event.message.includes('websocket') ||
-              event.message.includes('Failed to connect')
-            )) {
-              event.preventDefault();
-              event.stopPropagation();
-            }
-          }, true);
-        }
+        // 1. Suppress console.error for benign Vite WebSocket HMR messages
+        var origConsoleError = console.error;
+        console.error = function() {
+          var firstArg = arguments[0];
+          var msg = typeof firstArg === 'string' ? firstArg : (firstArg && firstArg.message ? firstArg.message : String(firstArg || ''));
+          if (msg.includes('failed to connect to websocket') || msg.includes('WebSocket closed without opened')) {
+            return;
+          }
+          origConsoleError.apply(console, arguments);
+        };
+
+        // 2. Suppress unhandled rejection events for benign WebSocket closure
+        window.addEventListener('unhandledrejection', function(event) {
+          var reason = event.reason;
+          var reasonStr = typeof reason === 'string' ? reason : (reason && reason.message ? reason.message : String(reason || ''));
+          if (reasonStr.includes('WebSocket') || reasonStr.includes('websocket')) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }, true);
+
+        // 3. Suppress window error events for benign WebSocket closure
+        window.addEventListener('error', function(event) {
+          var msg = typeof event === 'string' ? event : (event.message || '');
+          if (msg.includes('WebSocket') || msg.includes('websocket') || msg.includes('failed to connect to websocket')) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }, true);
       })();
     </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -52,6 +58,10 @@
     <meta name="keywords" content="criminology research, criminal psychology, power dynamics, systemic crime, political criminology, independent investigation, behavioral science, public policy research, sociology of power, academic crime studies, Priyasha Priyal Jena, political philosophy" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <link rel="canonical" href="https://theoligarchy.in/" />
+    
+    <!-- Syndicated RSS 2.0 & Atom Feed Discovery -->
+    <link rel="alternate" type="application/rss+xml" title="The Oligarchy — Scholarly RSS Feed" href="/feed.xml" />
+    <link rel="alternate" type="application/rss+xml" title="The Oligarchy RSS" href="/rss.xml" />
     
     <!-- Responsive Favicon Package Links -->
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />

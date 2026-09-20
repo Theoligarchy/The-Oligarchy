@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Instagram, Twitter, Linkedin, Mail, CheckCircle2, Send } from 'lucide-react';
+import { Instagram, Twitter, Linkedin, Mail, CheckCircle2, Send, Rss } from 'lucide-react';
 import { SiteSettings, SignupLocation } from '../types';
 
 interface FooterProps {
@@ -98,6 +98,15 @@ export default function Footer({ setActiveTab, setCategoryFilter, siteSettings, 
                 <Mail size={15} />
               </a>
             )}
+            <a 
+              href="/feed.xml" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="w-9 h-9 border border-paper/10 text-paper/50 hover:text-orange-400 hover:border-orange-400/50 flex items-center justify-center transition-all duration-200"
+              title="RSS / Atom Syndication Feed (feed.xml)"
+            >
+              <Rss size={15} />
+            </a>
           </div>
         </div>
 
@@ -199,6 +208,17 @@ export default function Footer({ setActiveTab, setCategoryFilter, siteSettings, 
               <span className="hover:text-paper transition-colors select-text">
                 Terms: Non-commercial fair research inquiry.
               </span>
+            </li>
+            <li>
+              <a 
+                href="/feed.xml" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="hover:text-orange-400 transition-colors text-left flex items-center gap-1.5 text-paper/50"
+                title="Syndicated RSS Feed (XML / Atom) for Feedly, NetNewsWire, and academic feed readers"
+              >
+                <Rss size={12} className="text-orange-400/80 shrink-0" /> RSS Syndication (feed.xml)
+              </a>
             </li>
           </ul>
 

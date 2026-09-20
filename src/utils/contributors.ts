@@ -47,6 +47,29 @@ export const INITIAL_CONTRIBUTORS: AuthorProfile[] = [
     joinedDate: '2024',
     createdAt: 1704067200000,
     updatedAt: Date.now()
+  },
+  {
+    id: 'sania',
+    name: 'Sania',
+    slug: 'sania',
+    role: 'Author & Contributing Researcher',
+    institution: 'The Oligarchy Contributing Researcher',
+    credentials: 'Author & Contributing Researcher',
+    bio: 'Contributing researcher and scholar exploring investigative criminology, institutional dynamics, and political analysis.',
+    researchAreas: ['Criminology', 'Behavioral Psyche', 'Power Dynamics'],
+    specializations: ['Criminology', 'Psyche', 'Politics'],
+    affiliations: ['The Oligarchy'],
+    tags: ['Criminology', 'Psyche', 'Politics'],
+    socials: {
+      email: 'saniasvb26@gmail.com'
+    },
+    email: 'saniasvb26@gmail.com',
+    isFounder: false,
+    isVisible: true,
+    displayOrder: 2,
+    joinedDate: '2026',
+    createdAt: 1774000000000,
+    updatedAt: Date.now()
   }
 ];
 

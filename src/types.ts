@@ -54,6 +54,7 @@ export interface Article {
   updatedAt: number;
   views: number;
   isFeatured: boolean;
+  featuredOrder?: number; // Order index for the 3-card horizontal featured layout (1 | 2 | 3)
   isPinned: boolean;
   sources: Source[];
   relatedArticles?: string[]; // IDs of related articles
@@ -62,6 +63,8 @@ export interface Article {
   versions?: ArticleVersion[]; // History of edits
   createdByUid?: string; // UID of the author/editor who created this manuscript
   createdByEmail?: string; // Email of the creator for ownership checks
+  assignedReviewerUids?: string[]; // Reviewers assigned to evaluate this manuscript
+  assignedReviewerEmails?: string[]; // Emails of assigned peer reviewers
   seoTitle?: string;
   seoDescription?: string;
   metaTitle?: string;
@@ -69,7 +72,36 @@ export interface Article {
   canonicalUrl?: string;
 }
 
-export type EditorialRole = 'author' | 'reviewer' | 'admin';
+export type EditorialRole = 'owner' | 'admin' | 'author' | 'reviewer' | 'guest_reviewer';
+
+export type Permission =
+  | 'article:create'
+  | 'article:read_all'
+  | 'article:read_own'
+  | 'article:read_assigned'
+  | 'article:edit_all'
+  | 'article:edit_own_draft'
+  | 'article:edit_assigned'
+  | 'article:suggest_edits'
+  | 'article:submit_for_review'
+  | 'article:review'
+  | 'article:leave_comments'
+  | 'article:request_revisions'
+  | 'article:approve'
+  | 'article:publish'
+  | 'article:schedule'
+  | 'article:delete'
+  | 'featured:manage'
+  | 'author:manage_all'
+  | 'author:manage_own'
+  | 'analytics:view'
+  | 'analytics:view_own'
+  | 'user:invite'
+  | 'user:manage'
+  | 'role:assign'
+  | 'settings:manage'
+  | 'deployment:view'
+  | 'security:manage';
 
 export interface EditorialUser {
   uid: string;
@@ -82,9 +114,28 @@ export interface EditorialUser {
   credentials?: string;
   bio?: string;
   assignedCategories?: ('criminology' | 'psyche' | 'politics')[];
+  assignedArticleIds?: string[]; // Specific articles assigned to this reviewer/author
+  permissionOverrides?: Partial<Record<Permission, boolean>>; // Individual permission overrides set by Owner
   createdAt?: number;
   lastLoginAt?: number;
-  status?: 'active' | 'pending' | 'suspended';
+  status?: 'invited' | 'active' | 'suspended' | 'revoked';
+  invitedBy?: string;
+  invitationToken?: string;
+}
+
+export interface UserAccountInvitation {
+  id: string;
+  email: string;
+  displayName: string;
+  role: EditorialRole;
+  assignedArticleIds?: string[];
+  permissionOverrides?: Partial<Record<Permission, boolean>>;
+  token: string;
+  status: 'pending' | 'accepted' | 'expired' | 'revoked';
+  expiresAt: number;
+  createdAt: number;
+  createdBy: string;
+  acceptedAt?: number;
 }
 
 export interface MediaFile {
@@ -507,6 +558,45 @@ export interface DailyArticleStats {
   attributedNewsletterSignups: number;
   updatedAt?: any; // Firestore server timestamp or epoch ms
   rebuiltAt?: number;
+}
+
+// ══════════════════════════════════════════════════════════════
+// ROLE-BASED ACCESS CONTROL & SECURITY INVITATIONS
+// ══════════════════════════════════════════════════════════════
+
+export interface ReviewInvitation {
+  id: string;
+  articleId: string;
+  articleTitle: string;
+  recipientEmail: string;
+  recipientName: string;
+  role: 'reviewer' | 'guest_reviewer';
+  token: string;
+  status: 'pending' | 'accepted' | 'expired' | 'revoked';
+  expiresAt: number;
+  createdAt: number;
+  createdBy: string;
+  acceptedAt?: number;
+}
+
+export interface AuditLog {
+  id: string;
+  action: string;
+  actorUid: string;
+  actorEmail: string;
+  actorRole: EditorialRole;
+  targetCollection: string;
+  targetId: string;
+  details: string;
+  timestamp: number;
+}
+
+export interface Subscriber {
+  id: string;
+  email: string;
+  subscribedAt?: number | string;
+  location?: string;
+  source?: string;
 }
 
 

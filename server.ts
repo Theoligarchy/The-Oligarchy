@@ -350,6 +350,149 @@ ${combinedText.slice(0, 10000)}
     }
   });
 
+  // RSS 2.0 & Atom Live Syndication Feed
+  app.get(['/feed.xml', '/rss.xml', '/atom.xml', '/feed'], async (req, res) => {
+    try {
+      // 1. If public/feed.xml or dist/feed.xml exists and was updated within last 10 minutes, serve quickly
+      const publicFeed = path.join(process.cwd(), 'public', 'feed.xml');
+      const distFeed = path.join(process.cwd(), 'dist', 'feed.xml');
+      const feedPath = fs.existsSync(distFeed) ? distFeed : (fs.existsSync(publicFeed) ? publicFeed : null);
+
+      if (feedPath) {
+        const stats = fs.statSync(feedPath);
+        const ageMs = Date.now() - stats.mtimeMs;
+        if (ageMs < 10 * 60 * 1000) {
+          const cachedXml = fs.readFileSync(feedPath, 'utf8');
+          res.set({
+            'Content-Type': 'application/rss+xml; charset=utf-8',
+            'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+          });
+          return res.status(200).send(cachedXml);
+        }
+      }
+
+      // 2. Fetch live published articles from Firestore REST API
+      let projectId = "the-oligarchy-a58f7";
+      let databaseId = "default";
+      let apiKey = "";
+      try {
+        const configRaw = fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8');
+        const parsed = JSON.parse(configRaw);
+        if (parsed.projectId) projectId = parsed.projectId;
+        if (parsed.firestoreDatabaseId) databaseId = parsed.firestoreDatabaseId;
+        if (parsed.apiKey) apiKey = parsed.apiKey;
+      } catch (e) {
+        // fallback
+      }
+
+      const keyParam = apiKey ? `?key=${apiKey}` : '';
+      const queryUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents:runQuery${keyParam}`;
+
+      const response = await fetch(queryUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          structuredQuery: {
+            from: [{ collectionId: 'articles' }],
+            where: {
+              fieldFilter: {
+                field: { fieldPath: 'status' },
+                op: 'EQUAL',
+                value: { stringValue: 'published' }
+              }
+            }
+          }
+        })
+      });
+
+      let articles: any[] = [];
+      if (response.ok) {
+        const results = await response.json();
+        if (Array.isArray(results)) {
+          for (const item of results) {
+            if (item.document) {
+              const doc = item.document;
+              const fields = doc.fields || {};
+              articles.push({
+                id: parseFirestoreValue(fields.id) || doc.name.split('/').pop(),
+                title: parseFirestoreValue(fields.title) || '',
+                subtitle: parseFirestoreValue(fields.subtitle) || '',
+                slug: parseFirestoreValue(fields.slug) || '',
+                excerpt: parseFirestoreValue(fields.excerpt) || '',
+                content: parseFirestoreValue(fields.content) || '',
+                featuredImage: parseFirestoreValue(fields.featuredImage) || '',
+                date: parseFirestoreValue(fields.originalPublishedAt) || parseFirestoreValue(fields.publishDate) || parseFirestoreValue(fields.date) || parseFirestoreValue(fields.publishedAt) || '',
+                author: parseFirestoreValue(fields.author) || 'Priyasha Priyal Jena',
+                category: parseFirestoreValue(fields.category) || 'Criminology',
+                updateTime: doc.updateTime || new Date().toISOString()
+              });
+            }
+          }
+        }
+      }
+
+      // If articles fetched, dynamically build feed XML
+      if (articles.length > 0) {
+        const siteUrl = 'https://theoligarchy.in';
+        const buildDate = new Date().toUTCString();
+        const slugify = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        const escapeXml = (unsafe: string) => String(unsafe || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+
+        let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/">\n  <channel>\n    <title>The Oligarchy — Journal of Criminology, Psyche &amp; Politics</title>\n    <link>${siteUrl}</link>\n    <description>An independent peer-reviewed archive and investigative journal dedicated to criminology, criminal psychology, and political power systems.</description>\n    <language>en-us</language>\n    <lastBuildDate>${buildDate}</lastBuildDate>\n    <atom:link href="${siteUrl}/feed.xml" rel="self" type="application/rss+xml" />\n    <image>\n      <url>${siteUrl}/logo_highres.png</url>\n      <title>The Oligarchy</title>\n      <link>${siteUrl}</link>\n    </image>\n`;
+
+        for (const art of articles) {
+          const permalink = art.slug ? `${siteUrl}/post/${slugify(art.slug)}` : `${siteUrl}/?art=${encodeURIComponent(art.id)}`;
+          let itemDate = new Date();
+          if (art.date) {
+            const parsed = new Date(art.date);
+            if (!isNaN(parsed.getTime())) itemDate = parsed;
+          }
+          xml += `    <item>\n      <title><![CDATA[${art.title || 'Untitled Treatise'}]]></title>\n      <link>${permalink}</link>\n      <guid isPermaLink="true">${permalink}</guid>\n      <pubDate>${itemDate.toUTCString()}</pubDate>\n      <dc:creator><![CDATA[${art.author || 'Priyasha Priyal Jena'}]]></dc:creator>\n      <category><![CDATA[${art.category || 'Criminology'}]]></category>\n      <description><![CDATA[${art.excerpt || art.subtitle || ''}]]></description>\n      <content:encoded><![CDATA[<p>${art.excerpt || ''}</p>${art.featuredImage ? `<p><img src="${art.featuredImage}" alt="${escapeXml(art.title)}" /></p>` : ''}<p><a href="${permalink}">Read the full treatise on The Oligarchy &rarr;</a></p>]]></content:encoded>\n`;
+          if (art.featuredImage && art.featuredImage.startsWith('http')) {
+            xml += `      <enclosure url="${art.featuredImage}" type="image/jpeg" length="0" />\n`;
+          }
+          xml += `    </item>\n`;
+        }
+        xml += `  </channel>\n</rss>`;
+
+        try {
+          const publicDir = path.join(process.cwd(), 'public');
+          if (fs.existsSync(publicDir)) {
+            fs.writeFileSync(path.join(publicDir, 'feed.xml'), xml, 'utf8');
+            fs.writeFileSync(path.join(publicDir, 'rss.xml'), xml, 'utf8');
+          }
+        } catch (e) {
+          // ignore
+        }
+
+        res.set({
+          'Content-Type': 'application/rss+xml; charset=utf-8',
+          'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+        });
+        return res.status(200).send(xml);
+      }
+
+      if (feedPath) {
+        const cachedXml = fs.readFileSync(feedPath, 'utf8');
+        res.set({
+          'Content-Type': 'application/rss+xml; charset=utf-8',
+          'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+        });
+        return res.status(200).send(cachedXml);
+      }
+
+      return res.status(404).send('RSS feed is being generated.');
+    } catch (feedErr: any) {
+      console.error('Error generating RSS feed in server.ts:', feedErr);
+      const publicFeed = path.join(process.cwd(), 'public', 'feed.xml');
+      if (fs.existsSync(publicFeed)) {
+        res.set({ 'Content-Type': 'application/rss+xml; charset=utf-8' });
+        return res.status(200).send(fs.readFileSync(publicFeed, 'utf8'));
+      }
+      return res.status(500).send('Error generating RSS feed.');
+    }
+  });
+
   let vite: any;
   if (!isProd) {
     vite = await createViteServer({

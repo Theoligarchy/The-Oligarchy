@@ -235,9 +235,75 @@
         "pageVersion": { "type": "string", "description": "Article revision or publication version string" }
       },
       "required": ["eventType", "articleId", "contentBlockId", "interactionType", "sessionId", "timestamp"]
+    },
+    "ReviewInvitation": {
+      "title": "ReviewInvitation",
+      "description": "Secure, cryptographic invitation token for external peer reviewers or guest scholars.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique token or invitation identifier" },
+        "articleId": { "type": "string", "description": "ID of the specific manuscript assigned for review" },
+        "articleTitle": { "type": "string", "description": "Title of the assigned manuscript" },
+        "recipientEmail": { "type": "string", "description": "Invited scholar email address" },
+        "recipientName": { "type": "string", "description": "Invited scholar name" },
+        "role": { "type": "string", "enum": ["reviewer", "guest_reviewer"], "description": "Invited role" },
+        "token": { "type": "string", "description": "Cryptographic access token" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "expired", "revoked"], "description": "Invitation status" },
+        "expiresAt": { "type": "number", "description": "Expiration epoch timestamp in ms" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in ms" },
+        "createdBy": { "type": "string", "description": "UID or email of managing editor" }
+      },
+      "required": ["id", "articleId", "recipientEmail", "token", "status", "expiresAt", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable security and editorial action audit trail.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique audit log entry ID" },
+        "action": { "type": "string", "description": "Editorial action verb (e.g. publish_article, revoke_member)" },
+        "actorUid": { "type": "string", "description": "Actor auth UID" },
+        "actorEmail": { "type": "string", "description": "Actor email address" },
+        "actorRole": { "type": "string", "description": "Actor role at execution" },
+        "targetCollection": { "type": "string", "description": "Affected collection" },
+        "targetId": { "type": "string", "description": "Target document ID" },
+        "details": { "type": "string", "description": "Contextual description or summary" },
+        "timestamp": { "type": "number", "description": "Action timestamp in ms" }
+      },
+      "required": ["id", "action", "actorEmail", "targetCollection", "targetId", "timestamp"]
+    },
+    "DraftInternalNote": {
+      "title": "DraftInternalNote",
+      "description": "Collaborative line-level review note, legal clearance flag, or fact-check marginalia.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique note ID" },
+        "articleId": { "type": "string", "description": "Associated draft manuscript ID" },
+        "category": { "type": "string", "enum": ["fact_checking", "legal_review", "citation_validation", "methodology", "general"] },
+        "urgency": { "type": "string", "enum": ["critical", "moderate", "minor"] },
+        "status": { "type": "string", "enum": ["open", "in_progress", "resolved"] },
+        "authorName": { "type": "string", "description": "Reviewer or author name" },
+        "authorEmail": { "type": "string", "description": "Reviewer or author email" },
+        "authorRole": { "type": "string", "description": "Author role" },
+        "content": { "type": "string", "description": "Review comment or note content" },
+        "timestamp": { "type": "number", "description": "Note creation timestamp" }
+      },
+      "required": ["id", "articleId", "category", "urgency", "status", "content", "timestamp"]
     }
   },
   "firestore": {
+    "/invitations/{inviteId}": {
+      "schema": "ReviewInvitation",
+      "description": "Cryptographic tokens for external peer reviewers."
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Immutable security and publishing audit trail."
+    },
+    "/draft_notes/{noteId}": {
+      "schema": "DraftInternalNote",
+      "description": "Internal editorial review, marginalia, and fact-checking feedback."
+    },
     "/resonant_quote_interactions/{interactionId}": {
       "schema": "ResonantQuoteEvent",
       "description": "Anonymous reader highlight and copy text interaction telemetry."

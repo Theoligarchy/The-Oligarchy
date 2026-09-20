@@ -23,6 +23,7 @@ import Header from './components/Header';
 import Footer, { SOCIAL_LINKS } from './components/Footer';
 import ArticleCard from './components/ArticleCard';
 import FeaturedResearch from './components/FeaturedResearch';
+import FeaturedResearchGrid from './components/FeaturedResearchGrid';
 import SourcesSection from './components/SourcesSection';
 import ReadingStack from './components/ReadingStack';
 import AboutSection from './components/AboutSection';
@@ -47,6 +48,7 @@ import {
   toggleArticleReadStatus, 
   updateArticleNote 
 } from './utils/savedArticles';
+import { fetchEditorialTeam } from './lib/rbac';
 import { motion, AnimatePresence } from 'motion/react';
 import { getOptimizedImageUrl } from './utils/imageOptimizer';
 import { getCachedArticles, setCachedArticles } from './utils/articleCache';
@@ -506,9 +508,8 @@ export default function App() {
   useEffect(() => {
     loadData();
 
-    // Track active authentication session state strictly for designated administrator.
-    // Instead of relying on the Firebase User object, verify user.email against the authorized email address.
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    // Track active authentication session state strictly for designated administrator and registered editorial team.
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       // Purge any legacy local sessions
       localStorage.removeItem('local_admin_session');
 
@@ -516,14 +517,38 @@ export default function App() {
         const email = user.email ? user.email.toLowerCase().trim() : '';
         if (email === AUTHORIZED_ADMIN_EMAIL.toLowerCase()) {
           setAdminUser(user);
+          setActiveEditorialUser({
+            uid: user.uid,
+            email: AUTHORIZED_ADMIN_EMAIL,
+            displayName: 'Priyasha Priyal Jena',
+            role: 'owner',
+            authorId: 'priyasha-priyal-jena',
+            status: 'active'
+          });
         } else {
-          // Explicitly reject any account whose email does not match the designated address
-          console.warn(`Unauthorized login attempt detected for ${user.email}. Revoking session.`);
-          auth.signOut().catch(console.error);
-          setAdminUser(null);
+          // Verify if user belongs to the authorized editorial team registry (e.g. author, reviewer, admin)
+          try {
+            const team = await fetchEditorialTeam();
+            const member = team.find(m => m.email.toLowerCase() === email && m.status !== 'suspended');
+            if (member) {
+              setAdminUser(user);
+              setActiveEditorialUser(member);
+              localStorage.setItem('tol_editorial_session', JSON.stringify(member));
+            } else {
+              console.warn(`Unauthorized login attempt detected for ${user.email}. Revoking session.`);
+              auth.signOut().catch(console.error);
+              setAdminUser(null);
+              setActiveEditorialUser(null);
+              localStorage.removeItem('tol_editorial_session');
+            }
+          } catch (err) {
+            console.warn('Editorial team auth verification error:', err);
+          }
         }
       } else {
         setAdminUser(null);
+        setActiveEditorialUser(null);
+        localStorage.removeItem('tol_editorial_session');
       }
     });
 
@@ -989,7 +1014,56 @@ export default function App() {
       .slice(0, 3);
   }, [selectedArticle, articles]);
 
-  const featuredPost = (siteSettings?.heroFeaturedArticleId ? articles.find(art => art.id === siteSettings.heroFeaturedArticleId) : null) || articles.find(art => art.isFeatured && art.status === 'published') || articles.find(art => art.status === 'published');
+  // Compute the 3 featured articles for the homepage horizontal grid
+  // Prioritize explicit slots (featuredOrder 1, 2, 3), followed by isFeatured articles, and graceful fallback to recent published articles
+  const featuredArticles = useMemo(() => {
+    const published = articles.filter(art => art.status === 'published');
+    if (published.length === 0) return [];
+
+    const slot1 = published.find(a => a.isFeatured && a.featuredOrder === 1);
+    const slot2 = published.find(a => a.isFeatured && a.featuredOrder === 2);
+    const slot3 = published.find(a => a.isFeatured && a.featuredOrder === 3);
+
+    const chosen: Article[] = [];
+    const usedIds = new Set<string>();
+
+    if (slot1) { chosen.push(slot1); usedIds.add(slot1.id); }
+    if (slot2 && !usedIds.has(slot2.id)) { chosen.push(slot2); usedIds.add(slot2.id); }
+    if (slot3 && !usedIds.has(slot3.id)) { chosen.push(slot3); usedIds.add(slot3.id); }
+
+    // If any slots are unfilled, fill with other isFeatured articles
+    if (chosen.length < 3) {
+      const otherFeatured = published.filter(a => a.isFeatured && !usedIds.has(a.id));
+      for (const art of otherFeatured) {
+        if (chosen.length >= 3) break;
+        chosen.push(art);
+        usedIds.add(art.id);
+      }
+    }
+
+    // If still under 3, fill with heroFeaturedArticleId or most recent published articles
+    if (chosen.length < 3 && siteSettings?.heroFeaturedArticleId) {
+      const heroArt = published.find(a => a.id === siteSettings.heroFeaturedArticleId && !usedIds.has(a.id));
+      if (heroArt) {
+        chosen.push(heroArt);
+        usedIds.add(heroArt.id);
+      }
+    }
+
+    if (chosen.length < 3) {
+      for (const art of published) {
+        if (chosen.length >= 3) break;
+        if (!usedIds.has(art.id)) {
+          chosen.push(art);
+          usedIds.add(art.id);
+        }
+      }
+    }
+
+    return chosen.slice(0, 3);
+  }, [articles, siteSettings]);
+
+  const featuredPost = featuredArticles[0] || articles.find(art => art.status === 'published');
 
   const handleSearch = (queryText: string) => {
     setSearchQuery(queryText);
@@ -1088,20 +1162,14 @@ export default function App() {
               </p>
             </section>
 
-            {/* FEATURED PINNED ESSAY */}
-            {featuredPost && (
-              <section className="py-12 px-6 md:px-12 max-w-7xl mx-auto border-b border-paper/10">
-                <div className="font-sans text-[10px] font-bold tracking-[0.35em] text-blood uppercase mb-6 text-center">
-                  Focus Research Paper
-                </div>
-                <FeaturedResearch 
-                  article={featuredPost} 
-                  onClick={() => handleArticleClick(featuredPost)} 
-                  isSaved={savedArticles.some(a => a.articleId === featuredPost.id)}
-                  onToggleSave={handleToggleSaveArticle}
-                />
-
-              </section>
+            {/* FEATURED RESEARCH: THREE-CARD HORIZONTAL ROW */}
+            {featuredArticles.length > 0 && (
+              <FeaturedResearchGrid
+                articles={featuredArticles}
+                onArticleClick={handleArticleClick}
+                savedArticles={savedArticles}
+                onToggleSave={handleToggleSaveArticle}
+              />
             )}
 
             {/* RESEARCH PORTFOLIO CATEGORY GRID */}
@@ -1605,18 +1673,52 @@ export default function App() {
         {activeTab === 'admin' && (
           <div className="fade-in">
             {isAuthorizedAdmin ? (
-              <AdminDashboard 
-                onLogout={() => {
+              (() => {
+                const isOwnerAdmin = Boolean(
+                  (adminUser?.email && adminUser.email.toLowerCase().trim() === AUTHORIZED_ADMIN_EMAIL.toLowerCase()) ||
+                  (activeEditorialUser?.email && activeEditorialUser.email.toLowerCase().trim() === AUTHORIZED_ADMIN_EMAIL.toLowerCase()) ||
+                  activeEditorialUser?.role === 'owner'
+                );
+
+                const handleLogout = () => {
                   auth.signOut().catch(console.error);
                   localStorage.removeItem('tol_editorial_session');
                   localStorage.removeItem('tol_simulated_role');
                   setAdminUser(null);
                   setActiveEditorialUser(null);
-                }} 
-                allArticles={articles}
-                refreshArticles={loadData}
-                editorialUser={activeEditorialUser}
-              />
+                };
+
+                // 1. Root Owner / Founder Account: Receives full existing Admin Dashboard with ALL features
+                if (isOwnerAdmin) {
+                  return (
+                    <AdminDashboard 
+                      onLogout={handleLogout} 
+                      allArticles={articles}
+                      refreshArticles={loadData}
+                      editorialUser={activeEditorialUser || {
+                        uid: adminUser?.uid || 'founder-priyasha',
+                        email: AUTHORIZED_ADMIN_EMAIL,
+                        displayName: 'Priyasha Priyal Jena',
+                        role: 'owner',
+                        authorId: 'priyasha-priyal-jena',
+                        status: 'active'
+                      }}
+                      isOwner={true}
+                    />
+                  );
+                }
+
+                // 2. Author / Managing Editor / Peer Reviewer: Receives AdminDashboard with role-gated tabs and permission controls
+                return (
+                  <AdminDashboard 
+                    onLogout={handleLogout} 
+                    allArticles={articles}
+                    refreshArticles={loadData}
+                    editorialUser={activeEditorialUser}
+                    isOwner={false}
+                  />
+                );
+              })()
             ) : (
               <div className="py-12">
                 <div className="text-center mb-8">
@@ -1637,7 +1739,7 @@ export default function App() {
                         uid: user.uid,
                         email: AUTHORIZED_ADMIN_EMAIL,
                         displayName: 'Priyasha Priyal Jena',
-                        role: 'admin',
+                        role: 'owner',
                         authorId: 'priyasha-priyal-jena',
                         status: 'active'
                       });

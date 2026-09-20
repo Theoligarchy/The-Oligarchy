@@ -78,6 +78,7 @@ interface ContributorDashboardProps {
   onOpenReviewQueue?: () => void;
   onSelectArticle?: (article: Article) => void;
   onNavigateHome?: () => void;
+  onLogout?: () => void;
 }
 
 export default function ContributorDashboard({
@@ -1498,7 +1499,7 @@ https://theoligarchy.in
                   <span className="text-paper/40">Shelf Saves:</span>
                   <span className="text-amber-300 font-bold flex items-center gap-1">
                     <Bookmark size={10} />
-                    {perArticleMetrics[performanceStats.mostEngagedPaper.id]?.bookmarks || 14} saves
+                    {perArticleMetrics[performanceStats.mostEngagedPaper.id]?.bookmarks || 0} saves
                   </span>
                 </div>
               </div>
@@ -1522,7 +1523,7 @@ https://theoligarchy.in
                   <span className="text-paper/40">Academic Citations:</span>
                   <span className="text-blue-300 font-bold flex items-center gap-1">
                     <Quote size={10} />
-                    {perArticleMetrics[performanceStats.topCitedPaper.id]?.citations || 12} exports
+                    {perArticleMetrics[performanceStats.topCitedPaper.id]?.citations || 0} exports
                   </span>
                 </div>
               </div>
@@ -1619,9 +1620,9 @@ https://theoligarchy.in
                     filteredPerformanceArticles.map((art) => {
                       const metrics = perArticleMetrics[art.id] || {
                         views: art.views || 0,
-                        citations: Math.max(3, Math.floor((art.views || 0) * 0.08)),
-                        bookmarks: Math.max(2, Math.floor((art.views || 0) * 0.04)),
-                        annotations: Math.max(1, Math.floor((art.views || 0) * 0.02))
+                        citations: 0,
+                        bookmarks: 0,
+                        annotations: 0
                       };
 
                       const logStats = viewsLogAnalytics?.perArticleAnalytics[art.id];
@@ -1831,9 +1832,9 @@ https://theoligarchy.in
                       filteredArticles.map((art) => {
                         const metrics = perArticleMetrics[art.id] || {
                           views: art.views || 0,
-                          citations: Math.max(3, Math.floor((art.views || 0) * 0.08)),
-                          bookmarks: Math.max(2, Math.floor((art.views || 0) * 0.04)),
-                          annotations: Math.max(1, Math.floor((art.views || 0) * 0.02))
+                          citations: 0,
+                          bookmarks: 0,
+                          annotations: 0
                         };
 
                         return (

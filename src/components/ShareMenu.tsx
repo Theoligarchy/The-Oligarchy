@@ -13,7 +13,8 @@ import {
   Info, 
   X, 
   ChevronRight,
-  ChevronDown
+  ChevronDown,
+  Rss
 } from 'lucide-react';
 import { Article } from '../types';
 
@@ -296,6 +297,24 @@ export default function ShareMenu({ article }: ShareMenuProps) {
                 </div>
                 <ChevronRight size={10} className="text-paper/20" />
               </button>
+
+              {/* Option: RSS Syndication Feed */}
+              <a
+                href="/feed.xml"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setIsOpen(false)}
+                className="w-full px-3 py-2.5 hover:bg-paper/[0.03] rounded-sm transition-colors flex items-center justify-between text-paper/85 hover:text-paper cursor-pointer group"
+                title="Syndicated XML Feed for academic readers and aggregators"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-6 h-6 rounded-full bg-paper/5 flex items-center justify-center group-hover:bg-orange-500/20 transition-colors">
+                    <Rss size={11} className="text-paper/60 group-hover:text-orange-400" />
+                  </div>
+                  <span className="font-serif text-xs">RSS Syndication Feed</span>
+                </div>
+                <span className="font-mono text-[9px] text-orange-400/70 group-hover:text-orange-400">XML</span>
+              </a>
 
               {/* Option: Native OS System Share (conditional fallback) */}
               {typeof navigator !== 'undefined' && navigator.share && (
