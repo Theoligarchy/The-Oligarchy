@@ -1,4 +1,14 @@
 import { Article } from '../types';
+import { INITIAL_CONTRIBUTORS } from './contributors';
+
+function escapeHtml(unsafe: string): string {
+  return String(unsafe || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 export const compileScholarlyPDF = (article: Article) => {
   // Format dates for metadata
@@ -10,6 +20,53 @@ export const compileScholarlyPDF = (article: Article) => {
 
   // Parse category for proper capitalisation
   const categoryStr = article.category.toUpperCase();
+
+  // 1. Resolve author identity strictly from the article itself
+  const rawAuthorId = (article.authorId || '').trim().toLowerCase();
+  const rawAuthorName = (article.authorName || '').trim();
+
+  // Match author profile from official contributors registry
+  const matchedContributor = INITIAL_CONTRIBUTORS.find(c =>
+    (rawAuthorId && c.id.toLowerCase() === rawAuthorId) ||
+    (c.slug && rawAuthorId && c.slug.toLowerCase() === rawAuthorId) ||
+    (rawAuthorName && c.name.toLowerCase() === rawAuthorName.toLowerCase())
+  );
+
+  // Derive Display Author Name: article.authorName takes precedence
+  let authorDisplayName = rawAuthorName;
+  if (!authorDisplayName && matchedContributor) {
+    authorDisplayName = matchedContributor.name;
+  }
+  if (!authorDisplayName) {
+    if (rawAuthorId === 'sania') authorDisplayName = 'Sania';
+    else if (rawAuthorId === 'priyasha-priyal-jena') authorDisplayName = 'Priyasha Priyal Jena';
+    else authorDisplayName = 'Staff Researcher';
+  }
+
+  const authorUpper = authorDisplayName.toUpperCase();
+
+  // Determine role / affiliation:
+  // Strictly enforce that Founder / Editor-in-Chief / Academic Board title ONLY belongs to Priyasha Priyal Jena
+  const isOwnerAuthor = rawAuthorId === 'priyasha-priyal-jena' ||
+    authorDisplayName.toLowerCase() === 'priyasha priyal jena' ||
+    Boolean(matchedContributor?.isFounder);
+
+  let authorTitleAffiliation = '';
+  if (article.authorTitle) {
+    authorTitleAffiliation = article.authorTitle;
+  } else if (isOwnerAuthor) {
+    authorTitleAffiliation = 'Founder & Editor-in-Chief · The Oligarchy Academic Board';
+  } else if (article.authorInstitution) {
+    authorTitleAffiliation = article.authorInstitution;
+  }
+
+  // Reviewers list if present
+  const reviewersList = Array.isArray(article.assignedReviewerEmails) && article.assignedReviewerEmails.length > 0
+    ? article.assignedReviewerEmails
+    : [];
+
+  // Co-authors if present
+  const coAuthors = Array.isArray(article.coAuthors) ? article.coAuthors.filter(ca => ca.name && ca.name.trim()) : [];
 
   // Build Bibliography entries
   const bibliographyHtml = article.sources && article.sources.length > 0
@@ -49,7 +106,9 @@ export const compileScholarlyPDF = (article: Article) => {
     <html lang="en">
     <head>
       <meta charset="UTF-8">
-      <title>${article.title} — The Oligarchy Scholarly Offprint</title>
+      <title>${escapeHtml(article.title)} — Author: ${escapeHtml(authorUpper)} — The Oligarchy Scholarly Offprint</title>
+      <meta name="author" content="${escapeHtml(authorDisplayName)}" />
+      <meta name="creator" content="${escapeHtml(authorDisplayName)}" />
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
         
@@ -356,22 +415,32 @@ export const compileScholarlyPDF = (article: Article) => {
       
       <!-- Structured Metadata Sheet -->
       <section class="metadata-section">
-        <h2 class="document-title">${article.title}</h2>
-        ${article.subtitle ? `<h3 class="document-subtitle">${article.subtitle}</h3>` : ''}
+        <h2 class="document-title">${escapeHtml(article.title)}</h2>
+        ${article.subtitle ? `<h3 class="document-subtitle">${escapeHtml(article.subtitle)}</h3>` : ''}
         
         <div class="document-author">
-          Author: Priyasha Priyal Jena &middot; Editor-in-Chief &middot; The Oligarchy Academic Board
+          AUTHOR: ${escapeHtml(authorUpper)}${authorTitleAffiliation ? ` &middot; ${escapeHtml(authorTitleAffiliation)}` : ''}${article.authorOrcid ? ` &middot; ORCID: ${escapeHtml(article.authorOrcid)}` : ''}
         </div>
+        ${coAuthors.length > 0 ? `
+          <div class="document-coauthors" style="font-family: 'Inter', sans-serif; font-size: 8pt; color: #444444; margin: -12px 0 15px 0; text-transform: uppercase; letter-spacing: 0.12em;">
+            <strong>CO-AUTHORS:</strong> ${coAuthors.map(ca => escapeHtml(ca.name.toUpperCase())).join(', ')}
+          </div>
+        ` : ''}
+        ${reviewersList.length > 0 ? `
+          <div class="document-editorial-review" style="font-family: 'Inter', sans-serif; font-size: 8pt; color: #555555; margin: -8px 0 15px 0; text-transform: uppercase; letter-spacing: 0.1em;">
+            <strong>EDITORIAL REVIEW:</strong> ${escapeHtml(reviewersList.join(', '))}
+          </div>
+        ` : ''}
         
         <div class="abstract-box">
           <div class="abstract-title">Abstract &amp; Summary Analysis</div>
           <p class="abstract-text">
-            ${article.excerpt || article.subtitle || 'An in-depth critical and academic investigation compiled from legal dossiers, psychological profile logs, and verified organizational power network trace elements.'}
+            ${escapeHtml(article.excerpt || article.subtitle || 'An in-depth critical and academic investigation compiled from legal dossiers, psychological profile logs, and verified organizational power network trace elements.')}
           </p>
         </div>
         
         <div style="font-family: 'Inter', sans-serif; font-size: 8pt; color: #555555; text-transform: uppercase; letter-spacing: 0.08em; display: flex; justify-content: space-between;">
-          <span>Category: ${categoryStr} &middot; ${article.readTime || '5 MIN READ'}</span>
+          <span>Category: ${categoryStr} &middot; ${escapeHtml(article.readTime || '5 MIN READ')}</span>
           <span>Published: ${publishDateStr}</span>
         </div>
       </section>
@@ -383,6 +452,13 @@ export const compileScholarlyPDF = (article: Article) => {
       
       <!-- Bibliography List -->
       ${bibliographyHtml}
+      
+      <!-- Scholarly Archival Reference & Colophon Footer -->
+      <footer style="margin-top: 36px; padding-top: 12px; border-top: 1px solid #dddddd; display: flex; justify-content: space-between; font-family: 'Inter', sans-serif; font-size: 7.5pt; color: #666666; text-transform: uppercase; letter-spacing: 0.1em;">
+        <span>The Oligarchy Archive &middot; Ref: ${escapeHtml(article.archivalRefId || `TOL-${categoryStr.slice(0, 3)}-${article.id.slice(-6).toUpperCase()}`)}</span>
+        <span>Author: ${escapeHtml(authorUpper)}</span>
+        <span>${publishDateStr}</span>
+      </footer>
       
       <!-- Floating guidance overlay (will be invisible in print output) -->
       <div class="print-prompt no-print">

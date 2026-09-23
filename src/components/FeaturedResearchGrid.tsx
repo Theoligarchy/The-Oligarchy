@@ -41,11 +41,12 @@ export default function FeaturedResearchGrid({
         <div className="w-12 h-px bg-paper/15 mt-3" />
       </div>
 
-      {/* 3-Card Equal-Width Horizontal Layout */}
-      {/* Desktop (lg): 3 equal columns in one horizontal row */}
-      {/* Mobile / Tablet: Stacked or scroll-friendly layout with identical visual importance */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8 items-stretch">
-        {articles.map((article, index) => {
+      {/* 4-Card Equal-Width Responsive Layout */}
+      {/* Desktop (lg): Exactly 4 equal-width cards in ONE horizontal row */}
+      {/* Tablet (sm/md): 2 cards per row (2 rows) */}
+      {/* Mobile: 1 card per row (4 cards stacked vertically) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-5 items-stretch w-full">
+        {articles.slice(0, 4).map((article, index) => {
           const isSaved = savedArticles.some(s => s.articleId === article.id);
           const publishedDate = article.originalPublishedAt || article.publishDate || (
             article.createdAt 
@@ -58,11 +59,11 @@ export default function FeaturedResearchGrid({
               key={article.id || index}
               id={`featured-card-${index + 1}`}
               onClick={() => onArticleClick(article)}
-              className="bg-navy/90 border border-paper/10 flex flex-col justify-between overflow-hidden group cursor-pointer transition-all duration-300 hover:border-blood/50 hover:bg-paper/[0.02] shadow-xl rounded-sm select-none relative"
+              className="bg-navy/90 border border-paper/10 flex flex-col justify-between h-full overflow-hidden group cursor-pointer transition-all duration-300 hover:border-blood/50 hover:bg-paper/[0.02] shadow-xl rounded-sm select-none relative"
             >
               {/* Card Top: Banner Image & Category */}
-              <div>
-                <div className="w-full h-48 sm:h-52 overflow-hidden relative bg-ink border-b border-paper/10">
+              <div className="flex flex-col flex-grow">
+                <div className="w-full h-44 sm:h-48 lg:h-40 xl:h-44 overflow-hidden relative bg-ink border-b border-paper/10 shrink-0">
                   {article.featuredImage ? (
                     <img
                       src={getOptimizedImageUrl(article.featuredImage, 'card')}
@@ -83,10 +84,10 @@ export default function FeaturedResearchGrid({
                   {/* Gradient vignette */}
                   <div className="absolute inset-0 bg-gradient-to-t from-navy/95 via-navy/20 to-transparent pointer-events-none" />
 
-                  {/* Category Badge & Slot Order Indicator */}
+                  {/* Category Badge & Bookmark */}
                   <div className="absolute top-3 left-3 right-3 flex items-center justify-between z-10 pointer-events-none">
                     <span 
-                      className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-xs border shadow-sm ${
+                      className={`font-sans text-[8.5px] font-bold tracking-widest uppercase px-2 py-0.5 rounded-xs border shadow-sm ${
                         article.category === 'criminology'
                           ? 'bg-red-950/80 text-red-300 border-red-800/40'
                           : article.category === 'psyche'
@@ -115,9 +116,9 @@ export default function FeaturedResearchGrid({
                 </div>
 
                 {/* Content Section */}
-                <div className="p-6 md:p-7 flex flex-col gap-3">
+                <div className="p-5 sm:p-6 flex flex-col gap-2.5 flex-grow">
                   {/* Metadata Row: Date & Reading Time */}
-                  <div className="flex items-center justify-between font-sans text-[10px] text-paper/40 border-b border-paper/5 pb-2.5">
+                  <div className="flex items-center justify-between font-sans text-[10px] text-paper/40 border-b border-paper/5 pb-2">
                     <span className="flex items-center gap-1">
                       <Calendar size={11} className="text-paper/30" />
                       {publishedDate}
@@ -129,39 +130,43 @@ export default function FeaturedResearchGrid({
                   </div>
 
                   {/* Article Title */}
-                  <h3 className="font-display text-xl sm:text-2xl font-bold text-paper group-hover:text-paper group-hover:underline underline-offset-4 decoration-blood transition-colors leading-snug">
+                  <h3 className="font-display text-lg lg:text-xl font-bold text-paper group-hover:text-paper group-hover:underline underline-offset-4 decoration-blood transition-colors leading-snug line-clamp-2">
                     {article.title}
                   </h3>
 
-                  {/* Subtitle / Excerpt */}
+                  {/* Subtitle (if available) */}
                   {article.subtitle && (
-                    <h4 className="font-display text-xs italic text-paper/55 leading-relaxed line-clamp-2">
+                    <h4 className="font-display text-xs italic text-paper/55 leading-relaxed line-clamp-1">
                       {article.subtitle}
                     </h4>
                   )}
 
+                  {/* Excerpt */}
                   {article.excerpt && (
-                    <p className="font-serif text-xs md:text-sm text-paper/65 leading-relaxed line-clamp-3">
+                    <p className="font-serif text-xs text-paper/65 leading-relaxed line-clamp-3">
                       {article.excerpt}
                     </p>
                   )}
                 </div>
               </div>
 
-              {/* Card Bottom / Footer */}
-              <div className="px-6 md:px-7 pb-6 pt-3 mt-auto border-t border-paper/5 flex items-center justify-between gap-3">
+              {/* Card Bottom / Footer (Aligned perfectly at bottom across all cards) */}
+              <div className="px-5 sm:px-6 pb-5 pt-3 mt-auto border-t border-paper/5 flex items-center justify-between gap-2 shrink-0">
                 {/* Author attribution */}
-                <div className="flex flex-col">
-                  <span className="font-sans text-[8px] uppercase tracking-widest text-paper/30">
+                <div className="flex flex-col min-w-0 pr-1">
+                  <span className="font-sans text-[8px] uppercase tracking-widest text-blood font-bold">
                     Author
                   </span>
-                  <span className="font-serif text-xs text-paper/85 font-medium truncate max-w-[130px] sm:max-w-[160px]">
-                    {article.authorName || 'The Oligarchy'}
+                  <span 
+                    className="font-serif text-xs text-paper/85 font-medium truncate max-w-[100px] sm:max-w-[120px] xl:max-w-[140px]" 
+                    title={article.authorName || (article.authorId === 'sania' ? 'Sania' : 'The Oligarchy')}
+                  >
+                    {article.authorName || (article.authorId === 'sania' ? 'Sania' : 'The Oligarchy')}
                   </span>
                 </div>
 
                 {/* Direct Share Menu & Read Link */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <div onClick={(e) => e.stopPropagation()} className="relative z-20">
                     <ShareMenu article={article} />
                   </div>

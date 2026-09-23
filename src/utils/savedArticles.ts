@@ -95,7 +95,7 @@ export async function saveArticleToReadingList(article: Article, personalNote?: 
     title: article.title,
     subtitle: article.subtitle,
     category: article.category,
-    authorName: article.authorName || 'Priyasha Priyal Jena',
+    authorName: article.authorName || (article.authorId === 'sania' ? 'Sania' : 'The Oligarchy'),
     readTime: article.readTime || '5 min read',
     excerpt: article.excerpt || '',
     featuredImage: article.featuredImage,

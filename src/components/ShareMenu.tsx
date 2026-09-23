@@ -50,8 +50,9 @@ export default function ShareMenu({ article }: ShareMenuProps) {
   const shareTitle = `The Oligarchy — ${article.title}`;
   const shareText = `Read this independent research analysis on ${article.title} at The Oligarchy:`;
 
-  // Custom formatted Instagram caption
-  const instagramCaption = `📖 Studying "The Oligarchy" research analysis: "${article.title}" by Priyasha Priyal Jena. Explore the systems of power at: ${shareUrl} @theoligarchy.in #TheOligarchy #CriticalInquiry`;
+  // Custom formatted Instagram caption with dynamic author
+  const authorNameForCaption = (article.authorName || '').trim() || (article.authorId === 'sania' ? 'Sania' : 'The Oligarchy');
+  const instagramCaption = `📖 Studying "The Oligarchy" research analysis: "${article.title}" by ${authorNameForCaption}. Explore the systems of power at: ${shareUrl} @theoligarchy.in #TheOligarchy #CriticalInquiry`;
 
   // Close menu on click outside
   useEffect(() => {

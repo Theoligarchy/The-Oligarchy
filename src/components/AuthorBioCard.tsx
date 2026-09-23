@@ -60,9 +60,9 @@ export default function AuthorBioCard({
 
   // Current active author summary info
   const activeAuthor = authorsList[activeAuthorIndex] || authorsList[0] || {
-    name: currentArticle.authorName || 'Priyasha Priyal Jena',
-    role: 'Founder & Editor-in-Chief',
-    institution: undefined,
+    name: currentArticle.authorName || (currentArticle.authorId === 'sania' ? 'Sania' : 'Staff Researcher'),
+    role: currentArticle.authorTitle || (currentArticle.authorId === 'priyasha-priyal-jena' ? 'Founder & Editor-in-Chief' : undefined),
+    institution: currentArticle.authorInstitution,
     orcid: currentArticle.authorOrcid
   };
 
@@ -690,7 +690,7 @@ export default function AuthorBioCard({
           </div>
 
           <span className="font-sans text-[9px] text-paper/40 italic">
-            Other published investigations &amp; research papers by {matchedProfile.name}
+            Other published research papers &amp; treatises by {matchedProfile.name}
           </span>
         </div>
 
@@ -723,7 +723,7 @@ export default function AuthorBioCard({
 
                         {isCoAuthor && (
                           <span className="font-sans text-[8px] font-semibold text-blood-light bg-blood/10 border border-blood/20 px-1.5 py-0.2 rounded-xs">
-                            Co-Investigator
+                            Co-Author
                           </span>
                         )}
 

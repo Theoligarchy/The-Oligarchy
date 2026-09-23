@@ -344,10 +344,18 @@ export default function ReadingListDashboard({
                 </h3>
 
                 {item.subtitle && (
-                  <p className="font-display text-sm italic text-paper/50 mb-3">
+                  <p className="font-display text-sm italic text-paper/50 mb-2">
                     {item.subtitle}
                   </p>
                 )}
+
+                {/* Author attribution */}
+                <div className="font-sans text-[10px] uppercase tracking-wider text-paper/40 flex items-center gap-1.5 mb-3">
+                  <span>Author:</span>
+                  <span className="text-paper/85 font-semibold">
+                    {item.authorName || fullArticle?.authorName || 'Staff Researcher'}
+                  </span>
+                </div>
 
                 {/* Excerpt */}
                 <p className="font-serif text-sm text-paper/70 leading-relaxed mb-5 line-clamp-3">

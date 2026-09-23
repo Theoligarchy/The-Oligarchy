@@ -48,7 +48,7 @@ export default function MultiAuthorAttribution({
           <div className="flex flex-wrap items-center gap-y-2 gap-x-3">
             <span className="font-sans text-[9px] font-bold tracking-[0.2em] uppercase text-blood flex items-center gap-1 shrink-0">
               <Users size={12} />
-              {isMultiAuthor ? 'INVESTIGATIVE TEAM' : 'INVESTIGATED BY'}:
+              {isMultiAuthor ? 'AUTHORS' : 'AUTHOR'}:
             </span>
 
             {authors.map((author, idx) => {
@@ -135,7 +135,7 @@ export default function MultiAuthorAttribution({
             </span>
           </div>
           <h3 className="font-display text-lg font-bold text-paper">
-            Investigative Team &amp; Contributorship
+            {isMultiAuthor ? 'Authors & Contributorship' : 'Author & Contributorship'}
           </h3>
           <p className="font-serif text-xs text-paper/50 italic mt-0.5">
             Transparent attribution of research design, data collection, psychopathological modeling, and verification.

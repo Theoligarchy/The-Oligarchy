@@ -82,6 +82,14 @@ export default function ArticleCard({ article, onClick, isSaved = false, onToggl
           {article.title}
         </h3>
 
+        {/* Author Byline */}
+        <div className="font-sans text-[10px] uppercase tracking-wider text-paper/40 flex items-center gap-1.5 -mt-1 mb-1">
+          <span className="text-blood font-bold tracking-widest text-[9px]">AUTHOR:</span>
+          <span className="text-paper/85 font-semibold">
+            {article.authorName || (article.authorId === 'sania' ? 'Sania' : 'The Oligarchy')}
+          </span>
+        </div>
+
         {/* Excerpt Summary */}
         <p className="font-serif text-sm text-paper/60 leading-relaxed line-clamp-3">
           {article.excerpt}

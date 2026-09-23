@@ -285,6 +285,61 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
   const [deleteConfirmSubscriberId, setDeleteConfirmSubscriberId] = useState<string | null>(null);
   const [deleteConfirmArticleId, setDeleteConfirmArticleId] = useState<string | null>(null);
   const [showFeaturedSlotsModal, setShowFeaturedSlotsModal] = useState(false);
+  const [showArticlePreviewModal, setShowArticlePreviewModal] = useState(false);
+  const [authorArticleScope, setAuthorArticleScope] = useState<'my' | 'all'>('my');
+
+  // Dynamically resolve author profile from contributors registry or active authenticated session
+  const resolveCurrentAuthorProfile = React.useCallback(() => {
+    if (isOwnerUser) {
+      const founder = contributors.find(c => c.isFounder || c.id === 'priyasha-priyal-jena');
+      return {
+        id: founder?.id || 'priyasha-priyal-jena',
+        name: founder?.name || 'Priyasha Priyal Jena',
+        orcid: founder?.orcid || ''
+      };
+    }
+    const userEmail = (currentUser?.email || auth.currentUser?.email || '').toLowerCase().trim();
+    const userAuthorId = currentUser?.authorId;
+    const userDisplayName = currentUser?.displayName;
+
+    const matched = contributors.find(c =>
+      (userAuthorId && c.id === userAuthorId) ||
+      (c.email && c.email.toLowerCase().trim() === userEmail) ||
+      (userDisplayName && c.name.toLowerCase().trim() === userDisplayName.toLowerCase().trim())
+    );
+
+    if (matched) {
+      return {
+        id: matched.id,
+        name: matched.name,
+        orcid: matched.orcid || currentUser?.orcid || ''
+      };
+    }
+
+    return {
+      id: userAuthorId || (userEmail ? userEmail.split('@')[0].replace(/[^a-z0-9]/g, '-') : 'sania'),
+      name: userDisplayName || (userEmail ? userEmail.split('@')[0] : 'Sania'),
+      orcid: currentUser?.orcid || ''
+    };
+  }, [isOwnerUser, currentUser, contributors]);
+
+  // Check if article belongs to current authenticated user
+  const isMyArticle = React.useCallback((art: Article) => {
+    if (isOwnerUser) return true;
+    const profile = resolveCurrentAuthorProfile();
+    const userEmail = (currentUser?.email || auth.currentUser?.email || '').toLowerCase().trim();
+    const userUid = currentUser?.uid || auth.currentUser?.uid;
+
+    const matchAuthorId = art.authorId && (art.authorId === profile.id || (currentUser?.authorId && art.authorId === currentUser.authorId));
+    const matchName = art.authorName && (
+      art.authorName.trim().toLowerCase() === profile.name.trim().toLowerCase() ||
+      (currentUser?.displayName && art.authorName.trim().toLowerCase() === currentUser.displayName.trim().toLowerCase())
+    );
+    const matchUid = art.createdByUid && userUid && art.createdByUid === userUid;
+    const matchEmail = art.createdByEmail && userEmail && art.createdByEmail.toLowerCase() === userEmail;
+
+    return Boolean(matchAuthorId || matchName || matchUid || matchEmail);
+  }, [isOwnerUser, currentUser, resolveCurrentAuthorProfile]);
 
   useEffect(() => {
     // Resolve current editorial user and role
@@ -303,9 +358,10 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
       
       // Prefill author fields if author
       if (resolved.role === 'author' && !isOwnerUser) {
-        setAuthorName(resolved.displayName || 'Scholar Contributor');
-        setAuthorId(resolved.authorId || 'scholar-contributor');
-        if (resolved.orcid) setAuthorOrcid(resolved.orcid);
+        const profile = resolveCurrentAuthorProfile();
+        setAuthorName(profile.name);
+        setAuthorId(profile.id);
+        if (profile.orcid || resolved.orcid) setAuthorOrcid(profile.orcid || resolved.orcid || '');
       }
     };
     initRole();
@@ -1045,8 +1101,8 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
     setArticleErrors({});
     const sanitized = validation.sanitized;
 
-    const isAuthorOnly = effectiveRole === 'author';
-    const currentStatus = isAuthorOnly ? 'draft' : (forcedStatus || status);
+    const isAuthorOnly = effectiveRole === 'author' && !isOwnerUser;
+    const currentStatus = forcedStatus || status;
     const finalIsFeatured = isAuthorOnly ? false : isFeatured;
     const finalFeaturedOrder = isAuthorOnly ? undefined : (finalIsFeatured ? (featuredOrder || 1) : undefined);
     const finalIsPinned = isAuthorOnly ? false : isPinned;
@@ -1081,6 +1137,18 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
       updatedVersions = [newVersion, ...updatedVersions].slice(0, 10); // Keep last 10 versions
     }
 
+    // Resolve author byline: automatic and locked to author profile for authors, selectable for owner
+    const authorProfile = resolveCurrentAuthorProfile();
+    const resolvedAuthorId = isAuthorOnly
+      ? (existingArt?.authorId || authorProfile.id)
+      : (authorId.trim() || authorProfile.id || 'priyasha-priyal-jena');
+    const resolvedAuthorName = isAuthorOnly
+      ? (existingArt?.authorName || authorProfile.name)
+      : (sanitized.authorName || authorName.trim() || authorProfile.name || 'Priyasha Priyal Jena');
+    const resolvedAuthorOrcid = isAuthorOnly
+      ? (existingArt?.authorOrcid || authorProfile.orcid)
+      : (sanitized.authorOrcid || authorOrcid.trim() || authorProfile.orcid);
+
     const articleData: Article = {
       id: finalId,
       title: sanitized.title || title.trim(),
@@ -1091,9 +1159,9 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
       featuredImage: sanitized.featuredImage,
       canvaEmbed: sanitized.canvaEmbed,
       pdfLink: sanitized.pdfLink,
-      authorId: authorId.trim() || currentUser?.authorId || (!isOwnerUser && effectiveRole === 'author' ? 'sania' : 'priyasha-priyal-jena'),
-      authorName: sanitized.authorName || authorName.trim() || currentUser?.displayName || (!isOwnerUser && effectiveRole === 'author' ? 'Sania' : 'Priyasha Priyal Jena'),
-      authorOrcid: sanitized.authorOrcid,
+      authorId: resolvedAuthorId,
+      authorName: resolvedAuthorName,
+      authorOrcid: resolvedAuthorOrcid || undefined,
       createdByUid: existingArt?.createdByUid || currentUser?.uid || auth.currentUser?.uid,
       createdByEmail: existingArt?.createdByEmail || currentUser?.email || auth.currentUser?.email || undefined,
       doi: sanitized.doi,
@@ -1176,25 +1244,10 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
         }
       }
 
-      // If submitted for peer review by author, also ensure a submission entry exists in submissions collection
-      if (isAuthorOnly && forcedStatus === 'published') {
-        const subCol = collection(db, 'submissions');
-        await addDoc(subCol, {
-          title: sanitized.title || title.trim(),
-          category,
-          authorName: sanitized.authorName || authorName.trim() || currentUser?.displayName || 'Priyasha Priyal Jena',
-          authorEmail: currentUser?.email || auth.currentUser?.email || '',
-          affiliation: currentUser?.institution || '',
-          orcid: sanitized.authorOrcid || currentUser?.orcid || '',
-          abstract: sanitized.excerpt || sanitized.title || title.trim(),
-          submittedAt: Date.now(),
-          status: 'under_review',
-          articleId: finalId
-        });
-        setAlert({ text: `Manuscript "${sanitized.title || title}" submitted to the Peer Review Queue for editorial evaluation.`, type: 'success' });
-      } else {
-        setAlert({ text: `Manuscript saved successfully as ${currentStatus.toUpperCase()}.`, type: 'success' });
-      }
+      setAlert({ 
+        text: `Manuscript saved successfully as ${currentStatus.toUpperCase()}${currentStatus === 'published' ? ' (Live on site)' : ''}.`, 
+        type: 'success' 
+      });
 
       // Record non-repudiable audit trail entry
       recordAuditLog({
@@ -1202,8 +1255,37 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
         actor: currentUser || { uid: auth.currentUser?.uid || 'unknown', email: auth.currentUser?.email || '', displayName: currentUser?.displayName || '', role: effectiveRole },
         targetCollection: 'articles',
         targetId: finalId,
-        details: `Manuscript "${sanitized.title || title}" saved with status "${currentStatus}".`
+        details: `Manuscript "${sanitized.title || title}" saved with status "${currentStatus}" by ${resolvedAuthorName}.`
       }).catch(() => {});
+
+      // Trigger automatic newsletter broadcast if published and not previously sent
+      if (currentStatus === 'published') {
+        const existingArt = editingId ? allArticles.find(a => a.id === editingId) : null;
+        if (!existingArt?.newsletterSent) {
+          const idToken = await auth.currentUser?.getIdToken();
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
+
+          fetch('/api/newsletter/dispatch-published', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              articleId: finalId,
+              articleTitle: sanitized.title || title.trim(),
+              articleExcerpt: sanitized.excerpt || sanitized.subtitle || '',
+              articleSlug: sanitized.slug || slug.trim(),
+              articleCategory: category,
+              articleAuthor: resolvedAuthorName
+            })
+          }).then(async res => {
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.success && data.sentCount > 0) {
+              setAlert({ text: `Article published and dispatched to ${data.sentCount} subscribers!`, type: 'success' });
+              refreshArticles();
+            }
+          }).catch(() => {});
+        }
+      }
 
       clearWriteForm();
       await refreshArticles();
@@ -1242,9 +1324,10 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
     setSeriesName('');
     setSeriesPart('');
     const isAuthor = !isOwnerUser && effectiveRole === 'author';
-    setAuthorId(isAuthor ? (currentUser?.authorId || 'sania') : 'priyasha-priyal-jena');
-    setAuthorName(isAuthor ? (currentUser?.displayName || 'Sania') : 'Priyasha Priyal Jena');
-    setAuthorOrcid(isAuthor ? (currentUser?.orcid || '') : '');
+    const profile = resolveCurrentAuthorProfile();
+    setAuthorId(isAuthor ? profile.id : 'priyasha-priyal-jena');
+    setAuthorName(isAuthor ? profile.name : 'Priyasha Priyal Jena');
+    setAuthorOrcid(isAuthor ? (profile.orcid || '') : '');
     setDoi('');
     setCoAuthors([]);
     setNewCoName('');
@@ -1386,8 +1469,9 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
 
   // Toggle Live/Draft directly from table
   const handleTogglePublish = async (art: Article) => {
-    if (!isOwnerUser && effectiveRole !== 'admin') {
-      setAlert({ text: 'Access Denied: Publishing and unpublishing manuscripts is restricted to Editorial Administration.', type: 'error' });
+    const canToggle = isOwnerUser || effectiveRole === 'admin' || rbac.canEditArticle(art, currentUser);
+    if (!canToggle) {
+      setAlert({ text: 'Access Denied: You do not have permission to modify this manuscript status.', type: 'error' });
       return;
     }
     const nextStatus = art.status === 'published' ? 'draft' : 'published';
@@ -1434,9 +1518,74 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
         details: `Manuscript "${art.title}" transitioned to status "${nextStatus}".`
       }).catch(() => {});
       setAlert({ text: `Article set to ${nextStatus.toUpperCase()}. Historical publication date preserved.`, type: 'success' });
+
+      // Automatically dispatch newsletter if manuscript is now live and hasn't been sent yet
+      if (nextStatus === 'published' && !art.newsletterSent) {
+        const idToken = await auth.currentUser?.getIdToken();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
+
+        fetch('/api/newsletter/dispatch-published', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            articleId: art.id,
+            articleTitle: art.title,
+            articleExcerpt: art.excerpt,
+            articleSlug: art.slug,
+            articleCategory: art.category,
+            articleAuthor: art.authorName
+          })
+        }).then(async res => {
+          const d = await res.json().catch(() => ({}));
+          if (res.ok && d.success && d.sentCount > 0) {
+            setAlert({ text: `Manuscript set to LIVE and dispatched to ${d.sentCount} subscribers!`, type: 'success' });
+            refreshArticles();
+          }
+        }).catch(() => {});
+      }
+
       await refreshArticles();
     } catch (e: any) {
       setAlert({ text: `Toggle failed: ${e.message}`, type: 'error' });
+    }
+  };
+
+  // Manual trigger for editorial admin to broadcast an individual published article
+  const handleManualNewsletterDispatch = async (art: Article) => {
+    if (!isOwnerUser && effectiveRole !== 'admin') {
+      setAlert({ text: 'Access Denied: Newsletter broadcast dispatch is restricted to Editorial Administration.', type: 'error' });
+      return;
+    }
+    if (art.status !== 'published') {
+      setAlert({ text: 'Manuscript must be published before broadcasting to subscribers.', type: 'error' });
+      return;
+    }
+
+    setAlert({ text: `Initiating newsletter broadcast for "${art.title}"...`, type: 'info' });
+    try {
+      const res = await fetch('/api/newsletter/dispatch-published', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          articleId: art.id,
+          articleTitle: art.title,
+          articleExcerpt: art.excerpt,
+          articleSlug: art.slug,
+          articleCategory: art.category,
+          articleAuthor: art.authorName,
+          force: true
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setAlert({ text: `Newsletter dispatched to ${data.sentCount || 0} subscribers!`, type: 'success' });
+        await refreshArticles();
+      } else {
+        setAlert({ text: `Dispatch notice: ${data.message || data.error || 'Check Resend domain verification.'}`, type: 'error' });
+      }
+    } catch (err: any) {
+      setAlert({ text: `Newsletter dispatch error: ${err.message}`, type: 'error' });
     }
   };
 
@@ -2194,120 +2343,168 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
                   </span>
                 </div>
 
-                {/* Author Selection from Registry */}
-                <div className="bg-midnight/40 p-3 rounded-xs border border-paper/10 flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60 flex items-center gap-1.5">
-                      <Users size={12} className="text-blood" /> Select Registered Contributor / Scholar
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('authors')}
-                      className="text-blood hover:underline font-sans text-[9px] uppercase tracking-wider cursor-pointer"
-                    >
-                      + Manage Authors Registry
-                    </button>
-                  </div>
-                  <select
-                    value={authorId}
-                    onChange={(e) => {
-                      const selectedId = e.target.value;
-                      setAuthorId(selectedId);
-                      const found = contributors.find(c => c.id === selectedId);
-                      if (found) {
-                        setAuthorName(found.name);
-                        if (found.orcid) setAuthorOrcid(found.orcid);
-                      }
-                    }}
-                    className="bg-navy border border-paper/15 rounded-xs p-2 text-paper text-xs cursor-pointer focus:outline-none focus:border-blood font-serif"
-                  >
-                    <option value="">-- Choose Registered Author Profile (Auto-fills Byline) --</option>
-                    {contributors.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} {c.isFounder ? '★ (Founder)' : `(${c.role})`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex justify-between items-center">
-                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                        Primary Author Name
-                      </label>
-                      {articleErrors.authorName && (
-                        <span className="font-sans text-[9px] font-bold text-red-400">
-                          {articleErrors.authorName}
-                        </span>
-                      )}
+                {/* Author Identification */}
+                {!isOwnerUser && effectiveRole === 'author' ? (
+                  <div className="bg-midnight/70 p-4 rounded-sm border border-paper/15 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-blood/20 border border-blood/40 flex items-center justify-center font-display font-bold text-paper text-sm">
+                        {resolveCurrentAuthorProfile().name.charAt(0)}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-sans text-[8px] font-bold uppercase tracking-widest text-blood">
+                            Verified Author Byline
+                          </span>
+                          <span className="font-mono text-[8px] text-[#8bc4a8] bg-green-950/20 border border-green-800/30 px-1.5 py-0.5 rounded-xs">
+                            Active Scholar Account
+                          </span>
+                        </div>
+                        <h4 className="font-serif font-bold text-sm text-paper mt-0.5">
+                          {resolveCurrentAuthorProfile().name}
+                        </h4>
+                        <p className="font-sans text-[10px] text-paper/40">
+                          Treatise will publish under your registered author account ({resolveCurrentAuthorProfile().id}).
+                        </p>
+                      </div>
                     </div>
-                    <input
-                      type="text"
-                      placeholder="Primary author full name..."
-                      value={authorName}
-                      onChange={(e) => {
-                        clearArticleError('authorName');
-                        setAuthorName(e.target.value);
-                      }}
-                      className={`bg-navy border rounded-sm py-2 px-3 text-paper font-serif focus:outline-none text-xs ${
-                        articleErrors.authorName ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
-                      }`}
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                        Primary Author ORCID iD
-                      </label>
-                      {articleErrors.authorOrcid ? (
-                        <span className="font-sans text-[9px] font-bold text-red-400">
-                          {articleErrors.authorOrcid}
-                        </span>
-                      ) : (
-                        <span className="font-mono text-[8px] text-paper/30">0000-0000-0000-0000</span>
+                    <div className="flex items-center gap-3">
+                      {resolveCurrentAuthorProfile().orcid && (
+                        <div className="font-mono text-[9px] text-[#a6ce39] bg-[#a6ce39]/10 border border-[#a6ce39]/20 px-2.5 py-1.5 rounded-xs">
+                          ORCID: {resolveCurrentAuthorProfile().orcid}
+                        </div>
                       )}
+                      <div className="flex flex-col gap-1">
+                        <label className="font-sans text-[9px] font-semibold tracking-wider uppercase text-paper/40">
+                          Digital Object Identifier (DOI)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="10.xxxx/xxxx (optional)..."
+                          value={doi}
+                          onChange={(e) => setDoi(e.target.value)}
+                          className="bg-navy border border-paper/10 rounded-sm py-1 px-2.5 text-paper font-mono focus:outline-none focus:border-blood text-xs"
+                        />
+                      </div>
                     </div>
-                    <input
-                      type="text"
-                      placeholder="0000-0000-0000-0000"
-                      value={authorOrcid}
-                      onChange={(e) => {
-                        clearArticleError('authorOrcid');
-                        setAuthorOrcid(e.target.value);
-                      }}
-                      className={`bg-navy border rounded-sm py-2 px-3 text-paper font-mono focus:outline-none text-xs ${
-                        articleErrors.authorOrcid ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
-                      }`}
-                    />
                   </div>
+                ) : (
+                  <>
+                    {/* Author Selection from Registry (For Owner/Editor) */}
+                    <div className="bg-midnight/40 p-3 rounded-xs border border-paper/10 flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/60 flex items-center gap-1.5">
+                          <Users size={12} className="text-blood" /> Select Registered Contributor / Scholar
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('authors')}
+                          className="text-blood hover:underline font-sans text-[9px] uppercase tracking-wider cursor-pointer"
+                        >
+                          + Manage Authors Registry
+                        </button>
+                      </div>
+                      <select
+                        value={authorId}
+                        onChange={(e) => {
+                          const selectedId = e.target.value;
+                          setAuthorId(selectedId);
+                          const found = contributors.find(c => c.id === selectedId);
+                          if (found) {
+                            setAuthorName(found.name);
+                            if (found.orcid) setAuthorOrcid(found.orcid);
+                          }
+                        }}
+                        className="bg-navy border border-paper/15 rounded-xs p-2 text-paper text-xs cursor-pointer focus:outline-none focus:border-blood font-serif"
+                      >
+                        <option value="">-- Choose Registered Author Profile (Auto-fills Byline) --</option>
+                        {contributors.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} {c.isFounder ? '★ (Founder)' : `(${c.role})`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex justify-between items-center">
-                      <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
-                        Digital Object Identifier (DOI)
-                      </label>
-                      {articleErrors.doi && (
-                        <span className="font-sans text-[9px] font-bold text-red-400">
-                          {articleErrors.doi}
-                        </span>
-                      )}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                            Primary Author Name
+                          </label>
+                          {articleErrors.authorName && (
+                            <span className="font-sans text-[9px] font-bold text-red-400">
+                              {articleErrors.authorName}
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="Primary author full name..."
+                          value={authorName}
+                          onChange={(e) => {
+                            clearArticleError('authorName');
+                            setAuthorName(e.target.value);
+                          }}
+                          className={`bg-navy border rounded-sm py-2 px-3 text-paper font-serif focus:outline-none text-xs ${
+                            articleErrors.authorName ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                          }`}
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between">
+                          <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                            Primary Author ORCID iD
+                          </label>
+                          {articleErrors.authorOrcid ? (
+                            <span className="font-sans text-[9px] font-bold text-red-400">
+                              {articleErrors.authorOrcid}
+                            </span>
+                          ) : (
+                            <span className="font-mono text-[8px] text-paper/30">0000-0000-0000-0000</span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="0000-0000-0000-0000"
+                          value={authorOrcid}
+                          onChange={(e) => {
+                            clearArticleError('authorOrcid');
+                            setAuthorOrcid(e.target.value);
+                          }}
+                          className={`bg-navy border rounded-sm py-2 px-3 text-paper font-mono focus:outline-none text-xs ${
+                            articleErrors.authorOrcid ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                          }`}
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="font-sans text-[10px] font-semibold tracking-wider uppercase text-paper/40">
+                            Digital Object Identifier (DOI)
+                          </label>
+                          {articleErrors.doi && (
+                            <span className="font-sans text-[9px] font-bold text-red-400">
+                              {articleErrors.doi}
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="10.xxxx/xxxx..."
+                          value={doi}
+                          onChange={(e) => {
+                            clearArticleError('doi');
+                            setDoi(e.target.value);
+                          }}
+                          className={`bg-navy border rounded-sm py-2 px-3 text-paper font-mono focus:outline-none text-xs ${
+                            articleErrors.doi ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
+                          }`}
+                        />
+                      </div>
                     </div>
-                    <input
-                      type="text"
-                      placeholder="10.xxxx/xxxx..."
-                      value={doi}
-                      onChange={(e) => {
-                        clearArticleError('doi');
-                        setDoi(e.target.value);
-                      }}
-                      className={`bg-navy border rounded-sm py-2 px-3 text-paper font-mono focus:outline-none text-xs ${
-                        articleErrors.doi ? 'border-red-500/80 focus:border-red-400' : 'border-paper/10 focus:border-blood'
-                      }`}
-                    />
-                  </div>
-                </div>
+                  </>
+                )}
 
                 {/* Co-Authors / Secondary Researchers builder */}
                 <div className="pt-2 border-t border-paper/5">
@@ -2913,38 +3110,30 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
               {/* Publish State Options */}
               <div className="flex flex-wrap gap-4 pt-4 border-t border-paper/10 items-center justify-between">
                 <div className="flex flex-wrap gap-3 items-center">
-                  {!isOwnerUser && effectiveRole === 'author' ? (
-                    <>
-                      <button
-                        onClick={() => handleSavePost('published')}
-                        className="bg-blood hover:bg-blood-light text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm shadow-md cursor-pointer flex items-center gap-2"
-                        title="Submit your completed manuscript to the Editorial Review Queue"
-                      >
-                        <Send size={12} /> Submit for Peer Review
-                      </button>
-                      <button
-                        onClick={() => handleSavePost('draft')}
-                        className="bg-transparent border border-paper/20 hover:border-blood hover:text-paper hover:bg-blood/5 text-paper/60 font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm cursor-pointer transition-colors"
-                      >
-                        Save Working Draft
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => handleSavePost('published')}
-                        className="bg-blood hover:bg-blood-light text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm shadow-md cursor-pointer"
-                      >
-                        {editingId ? 'Apply Updates & Publish' : 'Publish Article'}
-                      </button>
-                      <button
-                        onClick={() => handleSavePost('draft')}
-                        className="bg-transparent border border-paper/20 hover:border-blood hover:text-paper hover:bg-blood/5 text-paper/60 font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm cursor-pointer transition-colors"
-                      >
-                        Save as Draft
-                      </button>
-                    </>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleSavePost('published')}
+                    className="bg-blood hover:bg-blood-light text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm shadow-md cursor-pointer flex items-center gap-2 transition-colors"
+                    title={editingId ? "Update article and keep published on site" : "Publish article immediately to The Oligarchy"}
+                  >
+                    <Send size={12} /> {editingId ? 'Apply Updates & Publish' : 'Publish Article'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSavePost('draft')}
+                    className="bg-transparent border border-paper/20 hover:border-blood hover:text-paper hover:bg-blood/5 text-paper/60 font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-8 rounded-sm cursor-pointer transition-colors"
+                    title="Save article as an unpublished working draft"
+                  >
+                    {editingId ? 'Save Working Draft' : 'Save as Draft'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowArticlePreviewModal(true)}
+                    className="bg-transparent border border-paper/20 hover:border-paper/40 text-paper/70 font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-6 rounded-sm cursor-pointer flex items-center gap-1.5 transition-colors"
+                    title="Preview how this article will look to readers"
+                  >
+                    <Eye size={12} /> Preview Article
+                  </button>
                   <button
                     type="button"
                     onClick={handleSuggestMetadata}
@@ -2958,8 +3147,9 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
 
                 {editingId && (
                   <button
+                    type="button"
                     onClick={clearWriteForm}
-                    className="bg-transparent border border-paper/10 hover:border-paper/40 text-paper/50 font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-6 rounded-sm cursor-pointer"
+                    className="bg-transparent border border-paper/10 hover:border-paper/40 text-paper/50 font-sans text-[10px] font-bold tracking-widest uppercase py-3.5 px-6 rounded-sm cursor-pointer transition-colors"
                   >
                     Cancel Edit
                   </button>
@@ -2970,10 +3160,16 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
 
           {/* ══ TAB 2: ALL ARTICLES / MY MANUSCRIPTS ══ */}
           {activeTab === 'articles' && (() => {
-            const scopedArticles = rbac.filterVisibleArticles(
+            const isAuthorOnly = !isOwnerUser && effectiveRole === 'author';
+            const baseScoped = rbac.filterVisibleArticles(
               allArticles, 
               currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole }
             );
+            const scopedArticles = (isAuthorOnly && authorArticleScope === 'my')
+              ? allArticles.filter(isMyArticle)
+              : (isAuthorOnly && authorArticleScope === 'all')
+                ? allArticles.filter(a => a.status === 'published' || isMyArticle(a))
+                : baseScoped;
 
             const filteredArticles = scopedArticles.filter(art => {
               // Category filter
@@ -3047,6 +3243,68 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
                     </button>
                   </div>
                 </div>
+
+                {/* Author Scope Sub-tabs: All My Manuscripts | My Published | My Drafts | View All Site Publications */}
+                {isAuthorOnly && (
+                  <div className="flex flex-wrap items-center gap-2 border-b border-paper/10 pb-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthorArticleScope('my');
+                        setArticleStatusFilter('all');
+                      }}
+                      className={`font-sans text-[10px] font-bold uppercase tracking-wider px-3.5 py-2 rounded-sm border transition-colors cursor-pointer ${
+                        authorArticleScope === 'my' && articleStatusFilter === 'all'
+                          ? 'bg-blood text-paper border-blood'
+                          : 'bg-paper/5 text-paper/60 border-paper/10 hover:text-paper hover:bg-paper/10'
+                      }`}
+                    >
+                      All My Manuscripts ({allArticles.filter(isMyArticle).length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthorArticleScope('my');
+                        setArticleStatusFilter('published');
+                      }}
+                      className={`font-sans text-[10px] font-bold uppercase tracking-wider px-3.5 py-2 rounded-sm border transition-colors cursor-pointer ${
+                        authorArticleScope === 'my' && articleStatusFilter === 'published'
+                          ? 'bg-blood text-paper border-blood'
+                          : 'bg-paper/5 text-paper/60 border-paper/10 hover:text-paper hover:bg-paper/10'
+                      }`}
+                    >
+                      My Published Articles ({allArticles.filter(a => isMyArticle(a) && a.status === 'published').length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthorArticleScope('my');
+                        setArticleStatusFilter('draft');
+                      }}
+                      className={`font-sans text-[10px] font-bold uppercase tracking-wider px-3.5 py-2 rounded-sm border transition-colors cursor-pointer ${
+                        authorArticleScope === 'my' && articleStatusFilter === 'draft'
+                          ? 'bg-blood text-paper border-blood'
+                          : 'bg-paper/5 text-paper/60 border-paper/10 hover:text-paper hover:bg-paper/10'
+                      }`}
+                    >
+                      My Drafts ({allArticles.filter(a => isMyArticle(a) && a.status === 'draft').length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthorArticleScope('all');
+                        setArticleStatusFilter('all');
+                      }}
+                      className={`font-sans text-[10px] font-bold uppercase tracking-wider px-3.5 py-2 rounded-sm border transition-colors cursor-pointer ml-auto ${
+                        authorArticleScope === 'all'
+                          ? 'bg-paper/15 text-paper border-paper/30'
+                          : 'bg-transparent text-paper/40 border-paper/10 hover:text-paper/70'
+                      }`}
+                    >
+                      View All Site Publications ({allArticles.filter(a => a.status === 'published').length})
+                    </button>
+                  </div>
+                )}
 
                 {/* Filter & Search Bar */}
                 {scopedArticles.length > 0 && (
@@ -3193,6 +3451,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
                           <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Article</th>
                           <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Category</th>
                           <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Status</th>
+                          <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Newsletter</th>
                           <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Published</th>
                           <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4">Views</th>
                           <th className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/40 py-3.5 px-4 text-right">Actions</th>
@@ -3234,6 +3493,33 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
                                 }`}>
                                   {art.status === 'published' ? 'Live' : 'Draft'}
                                 </span>
+                              )}
+                            </td>
+                            <td className="py-4 px-4 whitespace-nowrap">
+                              {art.newsletterSent ? (
+                                <span 
+                                  className="inline-flex items-center gap-1 font-sans text-[9px] font-bold tracking-wider uppercase text-[#8bc4a8] bg-green-950/20 border border-green-500/30 px-2 py-0.5 rounded-xs"
+                                  title={`Dispatched to ${art.newsletterSentCount || 0} subscribers on ${art.newsletterSentAt ? new Date(art.newsletterSentAt).toLocaleDateString('en-GB') : 'recorded'}`}
+                                >
+                                  <CheckCircle2 size={10} className="text-[#8bc4a8]" /> Sent ({art.newsletterSentCount || 0})
+                                </span>
+                              ) : art.status === 'published' ? (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="inline-flex items-center gap-1 font-sans text-[9px] text-paper/40 bg-paper/5 border border-paper/10 px-2 py-0.5 rounded-xs">
+                                    <Mail size={10} /> Pending
+                                  </span>
+                                  {(isOwnerUser || effectiveRole === 'admin') && (
+                                    <button
+                                      onClick={() => handleManualNewsletterDispatch(art)}
+                                      className="px-1.5 py-0.5 text-[8px] font-sans font-bold uppercase tracking-wider bg-blood/20 hover:bg-blood text-paper border border-blood/40 rounded-xs cursor-pointer transition-colors"
+                                      title="Dispatch email broadcast to subscribers now"
+                                    >
+                                      Send
+                                    </button>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="font-mono text-[9px] text-paper/30">—</span>
                               )}
                             </td>
                             <td className="py-4 px-4 font-serif text-xs text-paper/60 whitespace-nowrap">
@@ -4063,6 +4349,177 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
                 Editorial Note:
               </span>
               If fewer than 3 articles are explicitly marked with slots 1, 2, or 3, the homepage will automatically fall back to the most recently published articles to guarantee a balanced, complete 3-card horizontal presentation.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Article Reader Appearance Live Preview Modal */}
+      {showArticlePreviewModal && (
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-ink border border-paper/20 rounded-sm w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-navy/80 border-b border-paper/15 px-6 py-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-blood animate-pulse" />
+                <span className="font-sans text-[10px] font-bold uppercase tracking-[0.2em] text-blood">
+                  Article Preview • Reader Appearance Mode
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowArticlePreviewModal(false)}
+                className="text-paper/50 hover:text-paper font-sans text-xs uppercase tracking-wider px-2.5 py-1 border border-paper/10 hover:border-paper/30 rounded-xs cursor-pointer transition-colors"
+              >
+                Close Preview ✕
+              </button>
+            </div>
+
+            {/* Modal Body - Rendered Article Preview */}
+            <div className="p-6 md:p-10 overflow-y-auto space-y-6">
+              {/* Category, Read Time, and Status */}
+              <div className="flex flex-wrap items-center gap-3 border-b border-paper/10 pb-4">
+                <span className="font-sans text-[9px] font-bold uppercase tracking-widest text-blood bg-blood/10 border border-blood/30 px-2 py-0.5 rounded-xs">
+                  {category}
+                </span>
+                <span className="font-mono text-[10px] text-paper/40 flex items-center gap-1">
+                  <Clock size={11} /> {readTime || '5 min read'}
+                </span>
+                <span className="font-mono text-[10px] text-paper/40">
+                  Published: {publishDate || originalPublishedAt || 'Forthcoming'}
+                </span>
+                {doi && (
+                  <span className="font-mono text-[9px] text-[#a6ce39] bg-[#a6ce39]/10 border border-[#a6ce39]/30 px-2 py-0.5 rounded-xs ml-auto">
+                    DOI: {doi}
+                  </span>
+                )}
+              </div>
+
+              {/* Title & Subtitle */}
+              <div>
+                <h1 className="font-display text-2xl md:text-4xl font-bold text-paper tracking-tight leading-tight">
+                  {title || 'Untitled Manuscript'}
+                </h1>
+                {subtitle && (
+                  <h2 className="font-serif text-base md:text-lg text-paper/70 italic mt-2 leading-relaxed">
+                    {subtitle}
+                  </h2>
+                )}
+              </div>
+
+              {/* Author Byline */}
+              <div className="bg-midnight/60 border border-paper/10 p-4 rounded-sm flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-blood/20 border border-blood/40 flex items-center justify-center font-display font-bold text-paper text-sm">
+                    {(!isOwnerUser && effectiveRole === 'author' ? resolveCurrentAuthorProfile().name : authorName).charAt(0) || 'A'}
+                  </div>
+                  <div>
+                    <div className="font-sans text-[8px] font-bold uppercase tracking-widest text-blood">
+                      Author
+                    </div>
+                    <div className="font-serif font-bold text-sm text-paper">
+                      {!isOwnerUser && effectiveRole === 'author' ? resolveCurrentAuthorProfile().name : authorName || 'Staff Researcher'}
+                    </div>
+                  </div>
+                </div>
+                {(!isOwnerUser && effectiveRole === 'author' ? resolveCurrentAuthorProfile().orcid : authorOrcid) && (
+                  <span className="font-mono text-[9px] text-[#a6ce39] bg-[#a6ce39]/10 border border-[#a6ce39]/30 px-2 py-1 rounded-xs">
+                    ORCID: {!isOwnerUser && effectiveRole === 'author' ? resolveCurrentAuthorProfile().orcid : authorOrcid}
+                  </span>
+                )}
+              </div>
+
+              {/* Featured Image */}
+              {featuredImage && (
+                <div className="border border-paper/15 rounded-sm overflow-hidden bg-navy/40">
+                  <img
+                    src={featuredImage}
+                    alt={title || 'Featured banner'}
+                    className="w-full max-h-[380px] object-cover"
+                  />
+                </div>
+              )}
+
+              {/* Excerpt Abstract */}
+              {excerpt && (
+                <div className="border-y-2 border-paper/20 py-4 px-2 my-4 bg-paper/2">
+                  <p className="font-serif text-sm md:text-base italic text-paper/85 leading-relaxed">
+                    "{excerpt}"
+                  </p>
+                </div>
+              )}
+
+              {/* Body Content */}
+              <div className="font-serif text-paper/80 leading-relaxed space-y-4 pt-2">
+                {content ? (
+                  <div
+                    className="prose prose-invert max-w-none font-serif text-sm md:text-base leading-relaxed"
+                    dangerouslySetInnerHTML={{ __html: content }}
+                  />
+                ) : (
+                  <p className="italic text-paper/40 py-8 text-center">
+                    (No manuscript body text drafted yet.)
+                  </p>
+                )}
+              </div>
+
+              {/* Citations & Sources */}
+              {sources.length > 0 && (
+                <div className="border-t border-paper/15 pt-6 mt-6">
+                  <h4 className="font-sans text-[10px] font-bold uppercase tracking-widest text-paper/60 mb-3">
+                    References &amp; Forensic Sources ({sources.length})
+                  </h4>
+                  <ul className="space-y-2 text-xs font-serif text-paper/70">
+                    {sources.map((s, idx) => (
+                      <li key={idx} className="flex items-start gap-2">
+                        <span className="font-mono text-[9px] text-blood">[{idx + 1}]</span>
+                        <span>
+                          <strong className="text-paper/90">{s.title}</strong>
+                          {s.citation && <span className="text-paper/50"> — {s.citation}</span>}
+                          {s.url && (
+                            <a href={s.url} target="_blank" rel="noreferrer" className="text-blood hover:underline ml-1">
+                              [Source Link]
+                            </a>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer Controls */}
+            <div className="bg-navy/90 border-t border-paper/15 px-6 py-4 flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowArticlePreviewModal(false)}
+                className="bg-transparent border border-paper/20 hover:border-paper/40 text-paper/70 font-sans text-[10px] font-bold tracking-widest uppercase py-2.5 px-5 rounded-sm cursor-pointer"
+              >
+                Return to Editor
+              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowArticlePreviewModal(false);
+                    handleSavePost('draft');
+                  }}
+                  className="bg-transparent border border-paper/20 hover:border-blood hover:text-paper hover:bg-blood/5 text-paper/70 font-sans text-[10px] font-bold tracking-widest uppercase py-2.5 px-5 rounded-sm cursor-pointer transition-colors"
+                >
+                  Save as Draft
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowArticlePreviewModal(false);
+                    handleSavePost('published');
+                  }}
+                  className="bg-blood hover:bg-blood-light text-paper font-sans text-[10px] font-bold tracking-widest uppercase py-2.5 px-6 rounded-sm shadow-md cursor-pointer flex items-center gap-1.5 transition-colors"
+                >
+                  <Send size={12} /> {editingId ? 'Apply Updates & Publish' : 'Publish Article'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

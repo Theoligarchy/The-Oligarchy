@@ -59,11 +59,35 @@ export default function NewsletterDispatchPreview({
     return publishedArticles.find(a => a.id === selectedArticleId) || publishedArticles[0] || null;
   }, [publishedArticles, selectedArticleId]);
 
-  // Resend API Key
+  // Resend API Key & Server Status
   const [resendApiKey, setResendApiKey] = useState<string>(() => {
     return localStorage.getItem('tol_resend_api_key') || '';
   });
   const [showApiKey, setShowApiKey] = useState(false);
+  const [serverStatus, setServerStatus] = useState<{ configured: boolean; fromEmail?: string; provider?: string; mode?: string } | null>(null);
+  const [subscriberFilter, setSubscriberFilter] = useState<'all' | 'active' | 'unsubscribed'>('all');
+
+  // Query server-side newsletter configuration
+  useEffect(() => {
+    fetch('/api/newsletter/status')
+      .then(r => r.json())
+      .then(d => setServerStatus(d))
+      .catch(() => {});
+  }, []);
+
+  // Detailed Subscriber Metrics
+  const subscriberStats = useMemo(() => {
+    const total = subscribers.length;
+    const active = subscribers.filter(s => s.status !== 'unsubscribed').length;
+    const unsubscribed = subscribers.filter(s => s.status === 'unsubscribed').length;
+    return { total, active, unsubscribed };
+  }, [subscribers]);
+
+  const filteredSubscribers = useMemo(() => {
+    if (subscriberFilter === 'active') return subscribers.filter(s => s.status !== 'unsubscribed');
+    if (subscriberFilter === 'unsubscribed') return subscribers.filter(s => s.status === 'unsubscribed');
+    return subscribers;
+  }, [subscribers, subscriberFilter]);
 
   // Email Configuration State
   const [subject, setSubject] = useState<string>('');
@@ -277,7 +301,7 @@ export default function NewsletterDispatchPreview({
                 <tr>
                   <td>
                     <span style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; color: ${themeStyles.subtext};">
-                      Investigated &amp; Authored by <strong style="color: ${themeStyles.text};">${selectedArticle.author || 'Priyasha Priyal Jena'}</strong>
+                      Author: <strong style="color: ${themeStyles.text};">${(selectedArticle as any).authorName || selectedArticle.author || (selectedArticle.authorId === 'sania' ? 'Sania' : 'The Oligarchy')}</strong>
                     </span>
                   </td>
                 </tr>
@@ -345,7 +369,7 @@ export default function NewsletterDispatchPreview({
               <p style="margin: 0; font-size: 10px;">
                 <a href="https://theoligarchy.in/feed.xml" target="_blank" style="color: ${themeStyles.subtext}; text-decoration: underline;">RSS Syndication Feed</a> · 
                 <a href="https://theoligarchy.in/?tab=principles" target="_blank" style="color: ${themeStyles.subtext}; text-decoration: underline;">Editorial Charter</a> · 
-                <a href="mailto:theoligarchy.ppj@gmail.com?subject=Unsubscribe" style="color: ${themeStyles.subtext}; text-decoration: underline;">Unsubscribe</a>
+                <a href="https://theoligarchy.in/api/unsubscribe" target="_blank" style="color: ${themeStyles.subtext}; text-decoration: underline;">Self-Service Unsubscribe</a>
               </p>
               <p style="margin: 12px 0 0 0; font-size: 10px; color: ${themeStyles.subtext};">
                 © ${currentYear} The Oligarchy. Independent investigative criminology research.
@@ -371,7 +395,7 @@ Peer-Reviewed Research Platform · https://theoligarchy.in
 
 NEW DISPATCH: ${selectedArticle.title.toUpperCase()}
 Category: ${selectedArticle.category || 'Criminology'}
-Author: ${selectedArticle.author || 'Priyasha Priyal Jena'}
+Author: ${(selectedArticle as any).authorName || selectedArticle.author || (selectedArticle.authorId === 'sania' ? 'Sania' : 'The Oligarchy')}
 Read Time: ${selectedArticle.readTime || '10 min read'}
 
 ${selectedArticle.subtitle ? `Subtitle: ${selectedArticle.subtitle}\n` : ''}
@@ -383,7 +407,7 @@ READ THE COMPLETE EMPIRICAL INVESTIGATION:
 ${articleUrl}
 
 --- ACADEMIC CITATION ---
-${selectedArticle.author || 'Jena, P. P.'} (${new Date().getFullYear()}). ${selectedArticle.title}. The Oligarchy.
+${(selectedArticle as any).authorName || selectedArticle.author || (selectedArticle.authorId === 'sania' ? 'Sania' : 'The Oligarchy')} (${new Date().getFullYear()}). ${selectedArticle.title}. The Oligarchy.
 URL: ${articleUrl}
 
 ---
@@ -452,54 +476,48 @@ To unsubscribe, reply to this dispatch or email theoligarchy.ppj@gmail.com
     window.open(url, '_blank');
   };
 
-  // Send Test Email via Resend
+  // Send Test Email via Server-Side API
   const handleSendTestEmail = async () => {
-    if (!resendApiKey.trim()) {
-      setAlert({ text: 'Please configure your Resend API Key first.', type: 'error' });
-      return;
-    }
     if (!testEmail.trim() || !testEmail.includes('@')) {
-      setAlert({ text: 'Please provide a valid test recipient email.', type: 'error' });
+      setAlert({ text: 'Please provide a valid test recipient email address.', type: 'error' });
       return;
     }
 
     setIsSendingTest(true);
     try {
-      const response = await fetch('https://api.resend.com/emails', {
+      const response = await fetch('/api/newsletter/send-test', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${resendApiKey.trim()}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          from: 'The Oligarchy <newsletter@theoligarchy.in>',
-          to: [testEmail.trim()],
+          testEmail: testEmail.trim(),
           subject: `[TEST PREVIEW] ${subject}`,
-          html: emailHtml
+          html: emailHtml,
+          articleId: selectedArticle?.id,
+          articleTitle: selectedArticle?.title,
+          apiKey: resendApiKey.trim() || undefined
         })
       });
 
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.message || `HTTP error ${response.status}`);
+        throw new Error(data.message || data.error || `Server HTTP ${response.status}`);
       }
 
-      setAlert({ text: `Test email successfully dispatched to ${testEmail}! Check your inbox.`, type: 'success' });
+      setAlert({ 
+        text: `Test email dispatched to ${testEmail}! (${data.provider === 'resend' ? 'Delivered via Resend' : 'Simulated for preview in dev mode'})`, 
+        type: 'success' 
+      });
     } catch (err: any) {
-      setAlert({ text: `Resend test dispatch failed: ${err.message}`, type: 'error' });
+      setAlert({ text: `Test dispatch error: ${err.message}`, type: 'error' });
     } finally {
       setIsSendingTest(false);
     }
   };
 
-  // Broadcast to All Subscribers
+  // Broadcast to All Active Subscribers via Server-Side Dispatch
   const handleBroadcastDispatch = async () => {
-    if (!resendApiKey.trim()) {
-      setAlert({ text: 'Resend API Key is required for live delivery.', type: 'error' });
-      return;
-    }
-    if (subscribers.length === 0) {
-      setAlert({ text: 'No active subscribers found in mailing list.', type: 'error' });
+    if (subscriberStats.active === 0) {
+      setAlert({ text: 'No active subscribers registered in database.', type: 'error' });
       return;
     }
 
@@ -507,26 +525,32 @@ To unsubscribe, reply to this dispatch or email theoligarchy.ppj@gmail.com
     setShowBroadcastConfirm(false);
 
     try {
-      const response = await fetch('https://api.resend.com/emails', {
+      const response = await fetch('/api/newsletter/dispatch-published', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${resendApiKey.trim()}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          from: 'The Oligarchy <newsletter@theoligarchy.in>',
-          to: subscribers.map(s => s.email),
+          articleId: selectedArticle.id,
+          articleTitle: selectedArticle.title,
+          articleExcerpt: selectedArticle.excerpt,
+          articleSlug: selectedArticle.slug,
+          articleCategory: selectedArticle.category,
+          articleAuthor: selectedArticle.authorName,
+          force: true, // Allow explicit broadcast from preview studio
           subject: subject.trim(),
-          html: emailHtml
+          html: emailHtml,
+          apiKey: resendApiKey.trim() || undefined
         })
       });
 
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.message || `HTTP error ${response.status}`);
+        throw new Error(data.message || data.error || `Server HTTP ${response.status}`);
       }
 
-      setAlert({ text: `Successfully broadcasted investigation alert to all ${subscribers.length} subscribers!`, type: 'success' });
+      setAlert({ 
+        text: `Newsletter broadcast complete: Dispatched to ${data.sentCount || subscriberStats.active} subscribers!`, 
+        type: 'success' 
+      });
     } catch (err: any) {
       setAlert({ text: `Broadcast delivery failed: ${err.message}`, type: 'error' });
     } finally {
@@ -571,6 +595,40 @@ To unsubscribe, reply to this dispatch or email theoligarchy.ppj@gmail.com
         </div>
       </div>
 
+      {/* KPI Metrics Strip: Real Subscriber & Infrastructure Health */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-navy border border-paper/10 p-3.5 rounded-sm">
+          <span className="font-sans text-[9px] uppercase tracking-wider text-paper/40 block">Total Subscribers</span>
+          <span className="font-mono text-xl font-bold text-paper mt-1 block">{subscriberStats.total}</span>
+          <span className="font-serif text-[10px] text-paper/30 mt-0.5 block">Registered in database</span>
+        </div>
+
+        <div className="bg-navy border border-paper/10 p-3.5 rounded-sm">
+          <span className="font-sans text-[9px] uppercase tracking-wider text-paper/40 block">Active Readership</span>
+          <span className="font-mono text-xl font-bold text-[#8bc4a8] mt-1 block">{subscriberStats.active}</span>
+          <span className="font-serif text-[10px] text-[#8bc4a8]/50 mt-0.5 block">Eligible for broadcasts</span>
+        </div>
+
+        <div className="bg-navy border border-paper/10 p-3.5 rounded-sm">
+          <span className="font-sans text-[9px] uppercase tracking-wider text-paper/40 block">Unsubscribed</span>
+          <span className="font-mono text-xl font-bold text-paper/50 mt-1 block">{subscriberStats.unsubscribed}</span>
+          <span className="font-serif text-[10px] text-paper/30 mt-0.5 block">Opted out of dispatches</span>
+        </div>
+
+        <div className="bg-navy border border-paper/10 p-3.5 rounded-sm">
+          <span className="font-sans text-[9px] uppercase tracking-wider text-paper/40 block">Delivery Pipeline</span>
+          <span className={`font-mono text-sm font-bold mt-1 block flex items-center gap-1.5 ${
+            serverStatus?.configured ? 'text-[#8bc4a8]' : 'text-amber-400'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${serverStatus?.configured ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
+            {serverStatus?.configured ? 'Resend Live' : 'Dev / Config Ready'}
+          </span>
+          <span className="font-serif text-[10px] text-paper/40 mt-0.5 block truncate">
+            {serverStatus?.fromEmail || 'The Oligarchy <newsletter@theoligarchy.in>'}
+          </span>
+        </div>
+      </div>
+
       {/* Main Grid: Controls on Left, Live Simulator on Right */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
         
@@ -595,20 +653,34 @@ To unsubscribe, reply to this dispatch or email theoligarchy.ppj@gmail.com
             >
               {publishedArticles.map((art) => (
                 <option key={art.id} value={art.id}>
-                  {art.title} {art.category ? `[${art.category}]` : ''}
+                  {art.title} {art.category ? `[${art.category}]` : ''} {art.newsletterSent ? '✓ Sent' : ''}
                 </option>
               ))}
             </select>
 
             {selectedArticle && (
-              <div className="bg-midnight/60 border border-paper/5 p-2.5 rounded-sm flex flex-col gap-1 text-[11px] font-serif text-paper/60">
+              <div className="bg-midnight/60 border border-paper/5 p-2.5 rounded-sm flex flex-col gap-2 text-[11px] font-serif text-paper/60">
                 <div className="flex justify-between text-paper/40 font-mono text-[9px] uppercase">
                   <span>{selectedArticle.category || 'Criminology'}</span>
                   <span>{selectedArticle.readTime || '10 min read'}</span>
                 </div>
-                <p className="line-clamp-2 italic text-paper/70 mt-0.5">
+                <p className="line-clamp-2 italic text-paper/70">
                   "{selectedArticle.excerpt || selectedArticle.subtitle || 'Empirical treatise'}"
                 </p>
+
+                {/* Newsletter Dispatch Audit Status Badge */}
+                <div className="pt-2 border-t border-paper/5 flex items-center justify-between">
+                  <span className="font-sans text-[9px] uppercase tracking-wider text-paper/40">Dispatch State:</span>
+                  {selectedArticle.newsletterSent ? (
+                    <span className="inline-flex items-center gap-1 font-sans text-[9px] font-bold uppercase tracking-wider text-[#8bc4a8] bg-green-950/30 border border-green-500/30 px-2 py-0.5 rounded-xs">
+                      <CheckCircle2 size={10} className="text-[#8bc4a8]" /> Sent to {selectedArticle.newsletterSentCount || 0} Readers ({selectedArticle.newsletterSentAt ? new Date(selectedArticle.newsletterSentAt).toLocaleDateString('en-GB') : 'Recorded'})
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 font-sans text-[9px] font-bold uppercase tracking-wider text-amber-300 bg-amber-950/20 border border-amber-500/30 px-2 py-0.5 rounded-xs">
+                      <Mail size={10} className="text-amber-300" /> Pending Broadcast
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -801,9 +873,9 @@ To unsubscribe, reply to this dispatch or email theoligarchy.ppj@gmail.com
             <div className="pt-2">
               <button
                 onClick={() => setShowBroadcastConfirm(true)}
-                disabled={isSendingBroadcast || subscribers.length === 0 || !resendApiKey.trim()}
+                disabled={isSendingBroadcast || subscriberStats.active === 0 || (!resendApiKey.trim() && !serverStatus?.configured)}
                 className={`w-full font-sans text-[11px] font-bold tracking-widest uppercase py-3 px-4 rounded-sm flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md ${
-                  isSendingBroadcast || subscribers.length === 0 || !resendApiKey.trim()
+                  isSendingBroadcast || subscriberStats.active === 0 || (!resendApiKey.trim() && !serverStatus?.configured)
                     ? 'bg-paper/5 text-paper/30 border border-paper/10 cursor-not-allowed'
                     : 'bg-blood hover:bg-blood-light text-paper'
                 }`}
@@ -811,12 +883,12 @@ To unsubscribe, reply to this dispatch or email theoligarchy.ppj@gmail.com
                 {isSendingBroadcast ? (
                   <>
                     <div className="w-4 h-4 border-t-2 border-paper rounded-full animate-spin" />
-                    Broadcasting to {subscribers.length} Subscribers...
+                    Broadcasting to {subscriberStats.active} Active Subscribers...
                   </>
                 ) : (
                   <>
                     <Send size={13} />
-                    Dispatch Alert to All {subscribers.length} Subscribers
+                    Dispatch Alert to {subscriberStats.active} Active Subscribers
                   </>
                 )}
               </button>
@@ -827,7 +899,7 @@ To unsubscribe, reply to this dispatch or email theoligarchy.ppj@gmail.com
           <div className="bg-navy border border-paper/10 rounded-sm p-4 flex flex-col gap-3">
             <div className="flex justify-between items-center border-b border-paper/5 pb-2">
               <h4 className="font-sans text-[10px] font-bold tracking-widest uppercase text-paper/80 flex items-center gap-1.5">
-                <UserCheck size={12} className="text-blood" /> Registered Subscribers ({subscribers.length})
+                <UserCheck size={12} className="text-blood" /> Readership Registry ({subscribers.length})
               </h4>
               {onExportCSV && (
                 <button
@@ -839,19 +911,60 @@ To unsubscribe, reply to this dispatch or email theoligarchy.ppj@gmail.com
               )}
             </div>
 
-            {subscribers.length === 0 ? (
+            {/* Filter Tabs */}
+            <div className="flex items-center gap-1 bg-midnight p-0.5 rounded-sm border border-paper/10 text-[9px] font-sans">
+              <button
+                onClick={() => setSubscriberFilter('all')}
+                className={`flex-1 py-1 px-1.5 rounded-xs uppercase tracking-wider text-center cursor-pointer transition-colors ${
+                  subscriberFilter === 'all' ? 'bg-paper/15 text-paper font-bold' : 'text-paper/40 hover:text-paper/80'
+                }`}
+              >
+                All ({subscriberStats.total})
+              </button>
+              <button
+                onClick={() => setSubscriberFilter('active')}
+                className={`flex-1 py-1 px-1.5 rounded-xs uppercase tracking-wider text-center cursor-pointer transition-colors ${
+                  subscriberFilter === 'active' ? 'bg-green-950/40 text-[#8bc4a8] font-bold' : 'text-paper/40 hover:text-[#8bc4a8]'
+                }`}
+              >
+                Active ({subscriberStats.active})
+              </button>
+              <button
+                onClick={() => setSubscriberFilter('unsubscribed')}
+                className={`flex-1 py-1 px-1.5 rounded-xs uppercase tracking-wider text-center cursor-pointer transition-colors ${
+                  subscriberFilter === 'unsubscribed' ? 'bg-rose-950/40 text-rose-400 font-bold' : 'text-paper/40 hover:text-rose-400'
+                }`}
+              >
+                Opted-Out ({subscriberStats.unsubscribed})
+              </button>
+            </div>
+
+            {filteredSubscribers.length === 0 ? (
               <div className="py-6 text-center text-paper/30 font-serif italic text-xs">
-                No active subscribers in registry.
+                No subscribers match filter criteria.
               </div>
             ) : (
-              <div className="max-h-[160px] overflow-y-auto divide-y divide-paper/5 pr-1">
-                {subscribers.map((sub, idx) => (
-                  <div key={sub.id || idx} className="py-1.5 first:pt-0 flex justify-between items-center text-xs font-serif text-paper/70">
-                    <span className="truncate select-text">{sub.email}</span>
+              <div className="max-h-[180px] overflow-y-auto divide-y divide-paper/5 pr-1">
+                {filteredSubscribers.map((sub, idx) => (
+                  <div key={sub.id || idx} className="py-2 first:pt-0 flex justify-between items-center text-xs font-serif text-paper/70">
+                    <div className="flex flex-col min-w-0 pr-2">
+                      <span className="truncate select-text font-medium text-paper/85">{sub.email}</span>
+                      <div className="flex items-center gap-1.5 mt-0.5 font-sans text-[8px]">
+                        {sub.status === 'unsubscribed' ? (
+                          <span className="uppercase tracking-wider text-rose-400 font-bold bg-rose-950/30 border border-rose-800/40 px-1 py-0.5 rounded-xs">
+                            Unsubscribed
+                          </span>
+                        ) : (
+                          <span className="uppercase tracking-wider text-[#8bc4a8] font-bold bg-green-950/30 border border-green-800/40 px-1 py-0.5 rounded-xs">
+                            Active
+                          </span>
+                        )}
+                        <span className="text-paper/30 font-mono">
+                          Subscribed: {new Date(sub.subscribedAt || Date.now()).toLocaleDateString('en-GB')}
+                        </span>
+                      </div>
+                    </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="font-mono text-[9px] text-paper/30">
-                        {new Date(sub.subscribedAt || Date.now()).toLocaleDateString('en-GB')}
-                      </span>
                       {onDeleteSubscriber && (
                         deleteConfirmSubscriberId === sub.id ? (
                           <div className="flex items-center gap-1 bg-red-950/40 border border-red-900/50 px-1 py-0.5 rounded-sm">
@@ -875,10 +988,10 @@ To unsubscribe, reply to this dispatch or email theoligarchy.ppj@gmail.com
                         ) : (
                           <button
                             onClick={() => setDeleteConfirmSubscriberId(sub.id)}
-                            className="text-red-400/50 hover:text-red-400 p-0.5 rounded cursor-pointer"
-                            title="Remove subscriber"
+                            className="text-red-400/50 hover:text-red-400 p-1 rounded cursor-pointer transition-colors"
+                            title="Remove subscriber record"
                           >
-                            <Trash2 size={11} />
+                            <Trash2 size={12} />
                           </button>
                         )
                       )}

@@ -29,9 +29,10 @@ export function getArticleAuthors(article: Article): { name: string; role?: stri
   const list: { name: string; role?: string; institution?: string; orcid?: string }[] = [];
 
   // Primary Author
-  if (article.authorName && article.authorName.trim()) {
+  const rawAuthorName = (article.authorName || (article as any).author || (article.authorId === 'sania' ? 'Sania' : (article.authorId === 'priyasha-priyal-jena' ? 'Priyasha Priyal Jena' : (article.authorId || '')))).trim();
+  if (rawAuthorName) {
     list.push({
-      name: article.authorName.trim(),
+      name: rawAuthorName,
       role: article.authorTitle || (article.authorId === 'priyasha-priyal-jena' ? 'Founder & Editor-in-Chief' : undefined),
       institution: article.authorInstitution || undefined,
       orcid: article.authorOrcid
@@ -53,9 +54,10 @@ export function getArticleAuthors(article: Article): { name: string; role?: stri
   }
 
   if (list.length === 0) {
+    const isSania = article.authorId === 'sania';
     list.push({
-      name: 'Priyasha Priyal Jena',
-      role: 'Founder & Editor-in-Chief'
+      name: isSania ? 'Sania' : 'Priyasha Priyal Jena',
+      role: isSania ? 'Author & Contributing Researcher' : 'Founder & Editor-in-Chief'
     });
   }
 

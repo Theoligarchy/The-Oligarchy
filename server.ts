@@ -1,8 +1,10 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
+import { generateVintageNewspaperEmail } from './src/utils/newsletterTemplate';
 
 // Helper: Lazy initialization of Gemini AI Client
 let aiClient: GoogleGenAI | null = null;
@@ -25,6 +27,19 @@ function getGeminiClient(): GoogleGenAI {
 }
 
 // Helper: Firestore REST API Integration
+let projectId = "the-oligarchy-a58f7";
+let databaseId = "default";
+let apiKey = "";
+try {
+  const configRaw = fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8');
+  const parsed = JSON.parse(configRaw);
+  if (parsed.projectId) projectId = parsed.projectId;
+  if (parsed.firestoreDatabaseId) databaseId = parsed.firestoreDatabaseId;
+  if (parsed.apiKey) apiKey = parsed.apiKey;
+} catch (e) {
+  // fallback
+}
+
 interface ArticleData {
   id: string;
   title: string;
@@ -83,18 +98,6 @@ async function getArticleByIdOrSlug(idOrSlug: string): Promise<ArticleData | nul
     // ignore
   }
 
-  let projectId = "the-oligarchy-a58f7";
-  let databaseId = "default";
-  let apiKey = "";
-  try {
-    const configRaw = fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8');
-    const parsed = JSON.parse(configRaw);
-    if (parsed.projectId) projectId = parsed.projectId;
-    if (parsed.firestoreDatabaseId) databaseId = parsed.firestoreDatabaseId;
-    if (parsed.apiKey) apiKey = parsed.apiKey;
-  } catch (e) {
-    // fallback
-  }
   const keyParam = apiKey ? `?key=${apiKey}` : '';
   const baseUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents`;
 
@@ -350,6 +353,592 @@ ${combinedText.slice(0, 10000)}
     }
   });
 
+  // =========================================================================
+  // REAL NEWSLETTER & SUBSCRIBER MANAGEMENT API
+  // =========================================================================
+
+  // Helper: Renders an academic/editorial styled unsubscribe confirmation page
+  function renderUnsubscribeHtml(headline: string, message: string, success: boolean): string {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${headline} — The Oligarchy</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #0b0c0e;
+      color: #ede9e1;
+      font-family: Georgia, 'Times New Roman', serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    .card {
+      max-width: 540px;
+      width: 100%;
+      background: #14161b;
+      border: 1px solid #2a2d36;
+      padding: 48px 40px;
+      text-align: center;
+      box-shadow: 0 12px 36px rgba(0,0,0,0.4);
+    }
+    .accent-strip {
+      height: 3px;
+      background: #7a1217;
+      margin: -48px -40px 36px -40px;
+    }
+    .eyebrow {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: #7a1217;
+      margin-bottom: 12px;
+    }
+    h1 {
+      font-size: 26px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin: 0 0 18px 0;
+      font-weight: 700;
+      color: #f7f5f0;
+    }
+    p {
+      font-size: 15px;
+      line-height: 1.65;
+      color: #b0a99c;
+      margin: 0 0 28px 0;
+    }
+    .divider {
+      height: 1px;
+      background: #252831;
+      margin: 24px 0;
+    }
+    .btn {
+      display: inline-block;
+      padding: 12px 24px;
+      background: #f7f5f0;
+      color: #0b0c0e;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      text-decoration: none;
+      border: 1px solid #f7f5f0;
+      transition: all 0.2s ease;
+    }
+    .btn:hover {
+      background: transparent;
+      color: #f7f5f0;
+    }
+    .footer-note {
+      font-size: 12px;
+      color: #635d52;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="accent-strip"></div>
+    <div class="eyebrow">THE OLIGARCHY &bull; EDITORIAL REGISTRY</div>
+    <h1>${headline}</h1>
+    <p>${message}</p>
+    <div class="divider"></div>
+    <div style="margin-bottom: 24px;">
+      <a href="/" class="btn">Return to Journal Archive &rarr;</a>
+    </div>
+    <div class="footer-note">The Oligarchy &bull; Independent Scholarly Journal of Criminology, Psyche &amp; Politics</div>
+  </div>
+</body>
+</html>`;
+  }
+
+  // 1. PUBLIC SUBSCRIBE ENDPOINT (Prevents Duplicates, Persists Real Records to Firestore)
+  app.post('/api/subscribe', async (req, res) => {
+    try {
+      const { email, location = 'website' } = req.body || {};
+      const rawEmail = typeof email === 'string' ? email.trim() : '';
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+      if (!rawEmail || !emailRegex.test(rawEmail)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Please enter a valid academic or professional email address (e.g. scholar@domain.edu).'
+        });
+      }
+
+      const normalizedEmail = rawEmail.toLowerCase();
+      // Deterministic alphanumeric document ID prevents duplicates at the database level
+      const hexId = Buffer.from(normalizedEmail).toString('hex');
+      const docId = 'sub_' + hexId;
+      const now = Date.now();
+
+      const createUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/subscribers?documentId=${docId}&key=${apiKey}`;
+      const createRes = await fetch(createUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            email: { stringValue: normalizedEmail },
+            status: { stringValue: 'active' },
+            subscribedAt: { integerValue: String(now) },
+            location: { stringValue: location },
+            unsubscribeToken: { stringValue: crypto.randomUUID() },
+            createdAt: { integerValue: String(now) },
+            updatedAt: { integerValue: String(now) }
+          }
+        })
+      });
+
+      if (createRes.status === 200 || createRes.status === 201) {
+        return res.status(200).json({
+          success: true,
+          duplicate: false,
+          message: 'Thank you for subscribing to The Oligarchy research dispatches.'
+        });
+      }
+
+      // 409 Conflict: Subscriber record already exists in database
+      if (createRes.status === 409) {
+        // Ensure status is reactivated if they were previously unsubscribed
+        const patchUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/subscribers/${docId}?updateMask.fieldPaths=status&updateMask.fieldPaths=subscribedAt&updateMask.fieldPaths=updatedAt&key=${apiKey}`;
+        await fetch(patchUrl, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fields: {
+              status: { stringValue: 'active' },
+              subscribedAt: { integerValue: String(now) },
+              updatedAt: { integerValue: String(now) }
+            }
+          })
+        }).catch(() => {});
+
+        return res.status(200).json({
+          success: true,
+          duplicate: true,
+          message: "You're already subscribed to The Oligarchy research dispatches."
+        });
+      }
+
+      const errData: any = await createRes.json().catch(() => ({}));
+      return res.status(createRes.status || 500).json({
+        success: false,
+        error: errData?.error?.message || 'Database error recording subscriber.'
+      });
+    } catch (err: any) {
+      console.error('Error in /api/subscribe:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Internal server error processing subscription.' });
+    }
+  });
+
+  // 2. UNSUBSCRIBE ENDPOINT (Web link & API endpoint)
+  app.all(['/api/unsubscribe', '/unsubscribe'], async (req, res, next) => {
+    // If GET to /unsubscribe with NO query parameters, forward to SPA frontend
+    if (req.path === '/unsubscribe' && req.method === 'GET' && !req.query.email && !req.query.token) {
+      return next();
+    }
+
+    try {
+      const rawEmail = (req.query.email || req.body?.email || '') as string;
+      const token = (req.query.token || req.body?.token || '') as string;
+      const trimmed = rawEmail.trim().toLowerCase();
+
+      if (!trimmed && !token) {
+        if (req.method === 'GET') {
+          return res.status(400).send(renderUnsubscribeHtml('Identifier Missing', 'No email or subscriber identifier was provided in the unsubscribe request.', false));
+        }
+        return res.status(400).json({ success: false, error: 'Email address or token identifier is required.' });
+      }
+
+      const docId = token && token.startsWith('sub_') ? token : (trimmed ? 'sub_' + Buffer.from(trimmed).toString('hex') : token);
+      const now = Date.now();
+
+      // Patch the subscriber status in Firestore without deleting historical records
+      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/subscribers/${docId}?updateMask.fieldPaths=status&updateMask.fieldPaths=unsubscribedAt&updateMask.fieldPaths=updatedAt&key=${apiKey}`;
+      const patchRes = await fetch(patchUrl, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            status: { stringValue: 'unsubscribed' },
+            unsubscribedAt: { integerValue: String(now) },
+            updatedAt: { integerValue: String(now) }
+          }
+        })
+      });
+
+      if (req.method === 'GET') {
+        return res.status(200).send(renderUnsubscribeHtml(
+          'Subscription Retired',
+          `Your email address (${trimmed || 'registered subscriber'}) has been removed from our active research dispatch registry. You will receive no further automated emails from The Oligarchy.`,
+          true
+        ));
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'You have been successfully unsubscribed from The Oligarchy dispatches.'
+      });
+    } catch (err: any) {
+      console.error('Error in /api/unsubscribe:', err);
+      if (req.method === 'GET') {
+        return res.status(500).send(renderUnsubscribeHtml('Dispatch Error', 'Unable to process unsubscribe request at this time.', false));
+      }
+      return res.status(500).json({ success: false, error: err.message || 'Internal server error processing unsubscription.' });
+    }
+  });
+
+  // 3. SECURE SERVER-SIDE PUBLISH TRIGGER & NEWSLETTER DISPATCH
+  // Triggered when an article is published. Securely invokes Resend server-side without exposing API keys.
+  app.post('/api/newsletter/dispatch-published', async (req, res) => {
+    try {
+      const { articleId, forceResend = false, subscribersList = [] } = req.body || {};
+
+      if (!articleId) {
+        return res.status(400).json({ success: false, error: 'articleId is required.' });
+      }
+
+      // 1. Fetch real article from Firestore
+      const authHeader = req.headers.authorization || '';
+      const articleUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/articles/${articleId}?key=${apiKey}`;
+      const articleRes = await fetch(articleUrl, {
+        headers: authHeader ? { 'Authorization': authHeader } : {}
+      });
+
+      if (!articleRes.ok) {
+        return res.status(404).json({ success: false, error: `Article ${articleId} not found in Firestore.` });
+      }
+
+      const articleDoc = await articleRes.json();
+      const fields = articleDoc.fields || {};
+      const articleStatus = fields.status?.stringValue || 'draft';
+      const articleTitle = fields.title?.stringValue || 'Untitled Manuscript';
+      const articleSlug = fields.slug?.stringValue || '';
+      const category = fields.category?.stringValue || 'criminology';
+      const excerpt = fields.excerpt?.stringValue || fields.description?.stringValue || '';
+      const content = fields.content?.stringValue || '';
+      const featuredImage = fields.featuredImage?.stringValue || '';
+      const authorName = fields.authorName?.stringValue || (fields.authorId?.stringValue === 'sania' ? 'Sania' : 'Priyasha Priyal Jena');
+      const originalPublishedAt = fields.originalPublishedAt?.stringValue || fields.publishDate?.stringValue || '';
+      const readTime = fields.readTime?.stringValue || '6 min read';
+      const doi = fields.doi?.stringValue || '';
+
+      // Check real publication state: only published articles can trigger dispatches
+      if (articleStatus !== 'published') {
+        return res.status(400).json({
+          success: false,
+          error: `Article is currently "${articleStatus}". Subscriber dispatches are strictly reserved for published treatises.`
+        });
+      }
+
+      // Check duplicate send protection
+      const isAlreadySent = fields.newsletterSent?.booleanValue === true;
+      if (isAlreadySent && !forceResend) {
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: 'Subscriber notification was already dispatched for this article. Duplicate send prevented.'
+        });
+      }
+
+      // 2. Fetch Active Subscribers from Firestore or use authenticated list
+      let activeRecipients: Array<{ email: string; id: string; unsubscribeToken?: string }> = [];
+
+      if (Array.isArray(subscribersList) && subscribersList.length > 0) {
+        activeRecipients = subscribersList.filter(s => s && s.email && s.status !== 'unsubscribed');
+      } else {
+        // Query Firestore subscribers collection using managing editor authorization
+        try {
+          const subsUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/subscribers?key=${apiKey}`;
+          const subsRes = await fetch(subsUrl, {
+            headers: authHeader ? { 'Authorization': authHeader } : {}
+          });
+          if (subsRes.ok) {
+            const subsData = await subsRes.json();
+            const docs = subsData.documents || [];
+            activeRecipients = docs
+              .map((d: any) => {
+                const subFields = d.fields || {};
+                const id = d.name.split('/').pop() || '';
+                return {
+                  id,
+                  email: subFields.email?.stringValue || '',
+                  status: subFields.status?.stringValue || 'active',
+                  unsubscribeToken: subFields.unsubscribeToken?.stringValue || id
+                };
+              })
+              .filter((s: any) => s.email && s.status !== 'unsubscribed');
+          }
+        } catch (subErr) {
+          console.warn('Failed to query subscribers via REST, fallback to empty list:', subErr);
+        }
+      }
+
+      if (activeRecipients.length === 0) {
+        return res.status(200).json({
+          success: true,
+          count: 0,
+          message: 'No active subscribers found in the registry.'
+        });
+      }
+
+      // 3. Resolve Resend API Configuration
+      const resendApiKey = process.env.RESEND_API_KEY || (req.headers['x-resend-key'] as string) || req.body?.resendApiKey || '';
+      const fromEmail = process.env.RESEND_FROM_EMAIL || 'The Oligarchy <newsletter@theoligarchy.in>';
+
+      if (!resendApiKey) {
+        const errorMsg = 'Resend API Key is not configured in server environment or admin headers.';
+        // Record failed state on article
+        await patchArticleNewsletterStatus(articleId, 'failed', errorMsg, authHeader);
+        return res.status(400).json({
+          success: false,
+          domainVerified: false,
+          error: errorMsg,
+          count: activeRecipients.length
+        });
+      }
+
+      // 4. Generate Vintage Newspaper Email
+      const articlePayload = {
+        id: articleId,
+        title: articleTitle,
+        slug: articleSlug,
+        category,
+        excerpt,
+        content,
+        featuredImage,
+        authorName,
+        originalPublishedAt,
+        readTime,
+        doi
+      };
+
+      const { subject, html, text } = generateVintageNewspaperEmail({
+        article: articlePayload,
+        siteUrl: 'https://theoligarchy.in'
+      });
+
+      // 5. Send via Resend API
+      // We send to all active recipients
+      const recipientEmails = activeRecipients.map(r => r.email.trim());
+      
+      const resendResponse = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendApiKey.trim()}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: fromEmail,
+          to: recipientEmails.length === 1 ? recipientEmails[0] : recipientEmails,
+          subject,
+          html,
+          text
+        })
+      });
+
+      const resendData: any = await resendResponse.json().catch(() => ({}));
+
+      if (!resendResponse.ok) {
+        // Detect domain verification requirement from Resend error response
+        const resendMsg = resendData?.message || resendData?.error?.message || 'Direct dispatch aborted by email service.';
+        const isDomainError = /domain.*not verified|validation_error|forbidden/i.test(resendMsg);
+        const userFacingError = isDomainError
+          ? `Resend Domain Validation Required: Direct dispatch aborted. The domain theoligarchy.in must be verified in your Resend account (resend.com/domains).`
+          : `Resend Dispatch Failed: ${resendMsg}`;
+
+        // Save status to article
+        await patchArticleNewsletterStatus(articleId, 'failed', userFacingError, authHeader);
+
+        return res.status(resendResponse.status).json({
+          success: false,
+          domainVerified: !isDomainError,
+          error: userFacingError,
+          rawError: resendData,
+          count: activeRecipients.length
+        });
+      }
+
+      // Success! Update article tracking fields in Firestore
+      const now = Date.now();
+      await patchArticleNewsletterSuccess(articleId, activeRecipients.length, now, authHeader);
+
+      return res.status(200).json({
+        success: true,
+        domainVerified: true,
+        count: activeRecipients.length,
+        resendId: resendData?.id || 'resend-ok',
+        message: `Successfully dispatched research alert for "${articleTitle}" to ${activeRecipients.length} subscriber(s).`
+      });
+
+    } catch (err: any) {
+      console.error('Error in /api/newsletter/dispatch-published:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Internal server error during dispatch.' });
+    }
+  });
+
+  // Helper: Patch article status on newsletter failure
+  async function patchArticleNewsletterStatus(articleId: string, status: string, errorMsg: string, authHeader: string) {
+    try {
+      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/articles/${articleId}?updateMask.fieldPaths=newsletterStatus&updateMask.fieldPaths=newsletterError&key=${apiKey}`;
+      await fetch(patchUrl, {
+        method: 'PATCH',
+        headers: authHeader ? { 'Content-Type': 'application/json', 'Authorization': authHeader } : { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            newsletterStatus: { stringValue: status },
+            newsletterError: { stringValue: errorMsg }
+          }
+        })
+      });
+    } catch {}
+  }
+
+  // Helper: Patch article on newsletter success
+  async function patchArticleNewsletterSuccess(articleId: string, count: number, sentAt: number, authHeader: string) {
+    try {
+      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/articles/${articleId}?updateMask.fieldPaths=newsletterSent&updateMask.fieldPaths=newsletterSentAt&updateMask.fieldPaths=newsletterSentCount&updateMask.fieldPaths=newsletterStatus&updateMask.fieldPaths=newsletterError&key=${apiKey}`;
+      await fetch(patchUrl, {
+        method: 'PATCH',
+        headers: authHeader ? { 'Content-Type': 'application/json', 'Authorization': authHeader } : { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            newsletterSent: { booleanValue: true },
+            newsletterSentAt: { integerValue: String(sentAt) },
+            newsletterSentCount: { integerValue: String(count) },
+            newsletterStatus: { stringValue: 'sent' },
+            newsletterError: { stringValue: '' }
+          }
+        })
+      });
+    } catch {}
+  }
+
+  // 4. TEST EMAIL DISPATCH
+  app.post('/api/newsletter/send-test', async (req, res) => {
+    try {
+      const { testEmail, articleId } = req.body || {};
+      const resendApiKey = process.env.RESEND_API_KEY || (req.headers['x-resend-key'] as string) || req.body?.resendApiKey || '';
+      const fromEmail = process.env.RESEND_FROM_EMAIL || 'The Oligarchy <newsletter@theoligarchy.in>';
+
+      if (!testEmail) {
+        return res.status(400).json({ success: false, error: 'testEmail is required.' });
+      }
+
+      if (!resendApiKey) {
+        return res.status(400).json({ success: false, error: 'Resend API Key is not configured.' });
+      }
+
+      // Fetch or synthesize sample test article
+      let sampleArticle: any = {
+        id: articleId || 'art-sample',
+        title: 'The Cartelization of Modern Criminal Networks',
+        subtitle: 'An Empirical Analysis of Systemic Institutional Capture and Regulatory Arbitrage',
+        slug: 'cartelization-of-modern-criminal-networks',
+        category: 'criminology',
+        excerpt: 'An investigation into how modern transnational networks leverage algorithmic financial secrecy and jurisdiction hopping to operate beyond classical jurisdictional reach.',
+        authorName: 'Priyasha Priyal Jena',
+        authorInstitution: 'Founder & Editor-in-Chief',
+        originalPublishedAt: '12 September 2026',
+        readTime: '7 min read',
+        doi: '10.1093/theoligarchy/2026.09.001'
+      };
+
+      if (articleId) {
+        try {
+          const artUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/articles/${articleId}?key=${apiKey}`;
+          const artRes = await fetch(artUrl);
+          if (artRes.ok) {
+            const artData = await artRes.json();
+            const f = artData.fields || {};
+            sampleArticle = {
+              id: articleId,
+              title: f.title?.stringValue || sampleArticle.title,
+              subtitle: f.subtitle?.stringValue,
+              slug: f.slug?.stringValue || sampleArticle.slug,
+              category: f.category?.stringValue || sampleArticle.category,
+              excerpt: f.excerpt?.stringValue || f.description?.stringValue || sampleArticle.excerpt,
+              content: f.content?.stringValue,
+              featuredImage: f.featuredImage?.stringValue,
+              authorName: f.authorName?.stringValue || sampleArticle.authorName,
+              originalPublishedAt: f.originalPublishedAt?.stringValue || f.publishDate?.stringValue || sampleArticle.originalPublishedAt,
+              readTime: f.readTime?.stringValue || sampleArticle.readTime,
+              doi: f.doi?.stringValue || sampleArticle.doi
+            };
+          }
+        } catch {}
+      }
+
+      const { subject, html, text } = generateVintageNewspaperEmail({
+        article: sampleArticle,
+        recipientEmail: testEmail,
+        siteUrl: 'https://theoligarchy.in'
+      });
+
+      const resendResponse = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendApiKey.trim()}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: fromEmail,
+          to: testEmail.trim(),
+          subject: `[TEST PREVIEW] ${subject}`,
+          html,
+          text
+        })
+      });
+
+      const resendData: any = await resendResponse.json().catch(() => ({}));
+
+      if (!resendResponse.ok) {
+        const resendMsg = resendData?.message || resendData?.error?.message || 'Direct dispatch aborted.';
+        const isDomainError = /domain.*not verified|validation_error|forbidden/i.test(resendMsg);
+        return res.status(resendResponse.status).json({
+          success: false,
+          domainVerified: !isDomainError,
+          error: isDomainError
+            ? `Resend Domain Validation Required: Direct dispatch aborted. The domain theoligarchy.in must be verified in your Resend account (resend.com/domains).`
+            : `Resend Dispatch Failed: ${resendMsg}`,
+          rawError: resendData
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        domainVerified: true,
+        message: `Test email successfully dispatched to ${testEmail}.`
+      });
+
+    } catch (err: any) {
+      console.error('Error in /api/newsletter/send-test:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Error sending test email.' });
+    }
+  });
+
+  // 5. STATUS CHECK
+  app.get('/api/newsletter/status', (req, res) => {
+    const hasResendKey = Boolean(process.env.RESEND_API_KEY);
+    const fromEmail = process.env.RESEND_FROM_EMAIL || 'The Oligarchy <newsletter@theoligarchy.in>';
+    return res.json({
+      configured: hasResendKey,
+      fromEmail,
+      provider: 'resend',
+      mode: process.env.NODE_ENV || 'development'
+    });
+  });
+
   // RSS 2.0 & Atom Live Syndication Feed
   app.get(['/feed.xml', '/rss.xml', '/atom.xml', '/feed'], async (req, res) => {
     try {
@@ -372,19 +961,6 @@ ${combinedText.slice(0, 10000)}
       }
 
       // 2. Fetch live published articles from Firestore REST API
-      let projectId = "the-oligarchy-a58f7";
-      let databaseId = "default";
-      let apiKey = "";
-      try {
-        const configRaw = fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8');
-        const parsed = JSON.parse(configRaw);
-        if (parsed.projectId) projectId = parsed.projectId;
-        if (parsed.firestoreDatabaseId) databaseId = parsed.firestoreDatabaseId;
-        if (parsed.apiKey) apiKey = parsed.apiKey;
-      } catch (e) {
-        // fallback
-      }
-
       const keyParam = apiKey ? `?key=${apiKey}` : '';
       const queryUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents:runQuery${keyParam}`;
 
@@ -422,7 +998,7 @@ ${combinedText.slice(0, 10000)}
                 content: parseFirestoreValue(fields.content) || '',
                 featuredImage: parseFirestoreValue(fields.featuredImage) || '',
                 date: parseFirestoreValue(fields.originalPublishedAt) || parseFirestoreValue(fields.publishDate) || parseFirestoreValue(fields.date) || parseFirestoreValue(fields.publishedAt) || '',
-                author: parseFirestoreValue(fields.author) || 'Priyasha Priyal Jena',
+                author: parseFirestoreValue(fields.authorName) || parseFirestoreValue(fields.author) || (parseFirestoreValue(fields.authorId) === 'sania' ? 'Sania' : 'The Oligarchy'),
                 category: parseFirestoreValue(fields.category) || 'Criminology',
                 updateTime: doc.updateTime || new Date().toISOString()
               });
@@ -447,7 +1023,7 @@ ${combinedText.slice(0, 10000)}
             const parsed = new Date(art.date);
             if (!isNaN(parsed.getTime())) itemDate = parsed;
           }
-          xml += `    <item>\n      <title><![CDATA[${art.title || 'Untitled Treatise'}]]></title>\n      <link>${permalink}</link>\n      <guid isPermaLink="true">${permalink}</guid>\n      <pubDate>${itemDate.toUTCString()}</pubDate>\n      <dc:creator><![CDATA[${art.author || 'Priyasha Priyal Jena'}]]></dc:creator>\n      <category><![CDATA[${art.category || 'Criminology'}]]></category>\n      <description><![CDATA[${art.excerpt || art.subtitle || ''}]]></description>\n      <content:encoded><![CDATA[<p>${art.excerpt || ''}</p>${art.featuredImage ? `<p><img src="${art.featuredImage}" alt="${escapeXml(art.title)}" /></p>` : ''}<p><a href="${permalink}">Read the full treatise on The Oligarchy &rarr;</a></p>]]></content:encoded>\n`;
+          xml += `    <item>\n      <title><![CDATA[${art.title || 'Untitled Treatise'}]]></title>\n      <link>${permalink}</link>\n      <guid isPermaLink="true">${permalink}</guid>\n      <pubDate>${itemDate.toUTCString()}</pubDate>\n      <dc:creator><![CDATA[${art.author || 'The Oligarchy'}]]></dc:creator>\n      <category><![CDATA[${art.category || 'Criminology'}]]></category>\n      <description><![CDATA[${art.excerpt || art.subtitle || ''}]]></description>\n      <content:encoded><![CDATA[<p>${art.excerpt || ''}</p>${art.featuredImage ? `<p><img src="${art.featuredImage}" alt="${escapeXml(art.title)}" /></p>` : ''}<p><a href="${permalink}">Read the full treatise on The Oligarchy &rarr;</a></p>]]></content:encoded>\n`;
           if (art.featuredImage && art.featuredImage.startsWith('http')) {
             xml += `      <enclosure url="${art.featuredImage}" type="image/jpeg" length="0" />\n`;
           }

@@ -6,6 +6,7 @@ import {
   collection, 
   getDocs, 
   doc, 
+  setDoc,
   updateDoc, 
   query, 
   orderBy, 
@@ -141,6 +142,7 @@ export default function App() {
   // Newsletter states
   const [newsletterEmail, setNewsletterEmail] = useState('');
   const [newsletterSuccess, setNewsletterSuccess] = useState(false);
+  const [newsletterSuccessMsg, setNewsletterSuccessMsg] = useState('You have successfully subscribed to The Research Brief list. Welcome to The Oligarchy.');
   const [newsletterError, setNewsletterError] = useState<string | null>(null);
   const [newsletterTouched, setNewsletterTouched] = useState(false);
   const [shakeTrigger, setShakeTrigger] = useState(0);
@@ -746,15 +748,45 @@ export default function App() {
       : (activeTab === 'article-view' ? selectedArticle : null);
 
     try {
-      const subsCol = collection(db, 'subscribers');
-      await addDoc(subsCol, {
-        email: trimmed,
-        subscribedAt: Date.now()
-      });
+      let displayMsg = 'Thank you for subscribing to The Oligarchy research dispatches.';
+      let apiSuccess = false;
+
+      // 1. Try real server-side endpoint with duplicate prevention
+      try {
+        const res = await fetch('/api/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: trimmed, location })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          apiSuccess = true;
+          if (data.duplicate) {
+            displayMsg = "You're already subscribed to The Oligarchy research dispatches.";
+          } else if (data.message) {
+            displayMsg = data.message;
+          }
+        }
+      } catch (fetchErr) {
+        console.warn('Backend /api/subscribe unreachable, using direct Firestore sync:', fetchErr);
+      }
+
+      // 2. Fallback: Direct Firestore write with deterministic ID to prevent duplicates
+      if (!apiSuccess) {
+        const subId = 'sub_' + btoa(encodeURIComponent(trimmed.toLowerCase())).replace(/[^a-zA-Z0-9_]/g, '');
+        const subRef = doc(db, 'subscribers', subId);
+        await setDoc(subRef, {
+          email: trimmed.toLowerCase(),
+          status: 'active',
+          subscribedAt: Date.now(),
+          location
+        }, { merge: true });
+      }
 
       if (customEmail === undefined) {
         setNewsletterEmail('');
       }
+      setNewsletterSuccessMsg(displayMsg);
       setNewsletterSuccess(true);
       setNewsletterTouched(false);
       setTimeout(() => setNewsletterSuccess(false), 8000);
@@ -1014,8 +1046,8 @@ export default function App() {
       .slice(0, 3);
   }, [selectedArticle, articles]);
 
-  // Compute the 3 featured articles for the homepage horizontal grid
-  // Prioritize explicit slots (featuredOrder 1, 2, 3), followed by isFeatured articles, and graceful fallback to recent published articles
+  // Compute the 4 featured articles for the homepage horizontal grid
+  // Prioritize explicit slots (featuredOrder 1, 2, 3, 4), followed by isFeatured articles, and graceful fallback to recent published articles
   const featuredArticles = useMemo(() => {
     const published = articles.filter(art => art.status === 'published');
     if (published.length === 0) return [];
@@ -1023,6 +1055,7 @@ export default function App() {
     const slot1 = published.find(a => a.isFeatured && a.featuredOrder === 1);
     const slot2 = published.find(a => a.isFeatured && a.featuredOrder === 2);
     const slot3 = published.find(a => a.isFeatured && a.featuredOrder === 3);
+    const slot4 = published.find(a => a.isFeatured && a.featuredOrder === 4);
 
     const chosen: Article[] = [];
     const usedIds = new Set<string>();
@@ -1030,19 +1063,20 @@ export default function App() {
     if (slot1) { chosen.push(slot1); usedIds.add(slot1.id); }
     if (slot2 && !usedIds.has(slot2.id)) { chosen.push(slot2); usedIds.add(slot2.id); }
     if (slot3 && !usedIds.has(slot3.id)) { chosen.push(slot3); usedIds.add(slot3.id); }
+    if (slot4 && !usedIds.has(slot4.id)) { chosen.push(slot4); usedIds.add(slot4.id); }
 
     // If any slots are unfilled, fill with other isFeatured articles
-    if (chosen.length < 3) {
+    if (chosen.length < 4) {
       const otherFeatured = published.filter(a => a.isFeatured && !usedIds.has(a.id));
       for (const art of otherFeatured) {
-        if (chosen.length >= 3) break;
+        if (chosen.length >= 4) break;
         chosen.push(art);
         usedIds.add(art.id);
       }
     }
 
-    // If still under 3, fill with heroFeaturedArticleId or most recent published articles
-    if (chosen.length < 3 && siteSettings?.heroFeaturedArticleId) {
+    // If still under 4, fill with heroFeaturedArticleId or most recent published articles
+    if (chosen.length < 4 && siteSettings?.heroFeaturedArticleId) {
       const heroArt = published.find(a => a.id === siteSettings.heroFeaturedArticleId && !usedIds.has(a.id));
       if (heroArt) {
         chosen.push(heroArt);
@@ -1050,9 +1084,9 @@ export default function App() {
       }
     }
 
-    if (chosen.length < 3) {
+    if (chosen.length < 4) {
       for (const art of published) {
-        if (chosen.length >= 3) break;
+        if (chosen.length >= 4) break;
         if (!usedIds.has(art.id)) {
           chosen.push(art);
           usedIds.add(art.id);
@@ -1060,7 +1094,7 @@ export default function App() {
       }
     }
 
-    return chosen.slice(0, 3);
+    return chosen.slice(0, 4);
   }, [articles, siteSettings]);
 
   const featuredPost = featuredArticles[0] || articles.find(art => art.status === 'published');
@@ -1162,7 +1196,7 @@ export default function App() {
               </p>
             </section>
 
-            {/* FEATURED RESEARCH: THREE-CARD HORIZONTAL ROW */}
+            {/* FEATURED RESEARCH: FOUR-CARD HORIZONTAL ROW */}
             {featuredArticles.length > 0 && (
               <FeaturedResearchGrid
                 articles={featuredArticles}
@@ -1492,8 +1526,8 @@ export default function App() {
                     animate={{ opacity: 1, scale: 1 }}
                     className="bg-green-950/20 border border-green-500/30 text-[#8bc4a8] font-serif text-sm p-4 rounded-sm mt-4 flex items-center justify-center gap-2"
                   >
-                    <CheckCircle2 size={16} className="text-[#8bc4a8]" />
-                    <span>You have successfully subscribed to The Research Brief list. Welcome to The Oligarchy.</span>
+                    <CheckCircle2 size={16} className="text-[#8bc4a8] shrink-0" />
+                    <span>{newsletterSuccessMsg}</span>
                   </motion.div>
                 ) : (
                   <motion.div
@@ -2093,8 +2127,8 @@ export default function App() {
 
                 {inArticleNewsletterSuccess ? (
                   <div className="bg-green-950/20 border border-green-500/30 text-[#8bc4a8] font-serif text-xs p-3.5 rounded-sm max-w-md mx-auto flex items-center justify-center gap-2">
-                    <CheckCircle2 size={15} className="text-[#8bc4a8]" />
-                    <span>You are subscribed to The Research Brief. Thank you for reading The Oligarchy.</span>
+                    <CheckCircle2 size={15} className="text-[#8bc4a8] shrink-0" />
+                    <span>{newsletterSuccessMsg}</span>
                   </div>
                 ) : (
                   <form

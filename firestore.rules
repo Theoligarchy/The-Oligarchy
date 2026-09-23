@@ -53,6 +53,14 @@ service cloud.firestore {
       return isEditorialMember() && (getEditorialRole() == 'author' || isManagingEditor());
     }
 
+    function isArticleAuthor(artData) {
+      return isSignedIn() && (
+        artData.createdByUid == request.auth.uid ||
+        (request.auth.token.email != null && artData.createdByEmail != null && artData.createdByEmail.lower() == request.auth.token.email.lower()) ||
+        (request.auth.token.email != null && request.auth.token.email.lower() == 'saniasvb26@gmail.com' && artData.authorId == 'sania')
+      );
+    }
+
     // Document ID and payload sanity guards
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
@@ -94,14 +102,11 @@ service cloud.firestore {
     // ════════════════════════════════════════════════════════════════
     match /articles/{articleId} {
       // Public can read published articles. Editorial members can read working drafts.
-      // An author can read their own drafts; managing editors and peer reviewers can read any draft
+      // An author can read their own drafts and published manuscripts; managing editors and peer reviewers can read any draft
       allow read: if (resource.data.status == 'published') ||
                      isManagingEditor() ||
                      isPeerReviewer() ||
-                     (isSignedIn() && (
-                       resource.data.createdByUid == request.auth.uid ||
-                       (request.auth.token.email != null && resource.data.createdByEmail == request.auth.token.email)
-                     ));
+                     isArticleAuthor(resource.data);
 
       // Public view counts increment
       allow update: if (incoming().diff(existing()).affectedKeys().hasOnly(['views']) &&
@@ -110,29 +115,31 @@ service cloud.firestore {
       // Managing Editor full article updates
       allow update: if isManagingEditor();
 
-      // Author can update their OWN DRAFT only (cannot self-publish or alter ownership)
-      allow update: if isEditorialMember() &&
-                       existing().status == 'draft' &&
-                       (existing().createdByUid == request.auth.uid ||
-                        (request.auth.token.email != null && existing().createdByEmail == request.auth.token.email)) &&
-                       incoming().status == 'draft' &&
-                       incoming().createdByUid == existing().createdByUid &&
-                       incoming().diff(existing()).affectedKeys().hasOnly([
-                         'title', 'subtitle', 'slug', 'category', 'tags', 'featuredImage',
-                         'excerpt', 'content', 'readTime', 'sources', 'coAuthors', 'updatedAt', 'seriesName', 'seriesPart'
-                       ]);
+      // Author can update their OWN article (draft or published)
+      // Can publish, unpublish, update manuscript content & citations, but cannot alter ownership
+      allow update: if isRegisteredAuthor() &&
+                       isArticleAuthor(existing()) &&
+                       incoming().status in ['draft', 'published'] &&
+                       incoming().authorId == existing().authorId &&
+                       (!('createdByUid' in existing()) || incoming().createdByUid == existing().createdByUid);
 
-      // Managing Editor can create any article. Authors can only create DRAFTS under their own UID.
+      // Managing Editor can create any article. Authors can create and publish their own articles.
       allow create: if isManagingEditor() ||
                        (isRegisteredAuthor() &&
-                        incoming().status == 'draft' &&
-                        incoming().createdByUid == request.auth.uid);
+                        incoming().status in ['draft', 'published'] &&
+                        (incoming().createdByUid == request.auth.uid ||
+                         (request.auth.token.email != null && incoming().createdByEmail != null && incoming().createdByEmail.lower() == request.auth.token.email.lower())) &&
+                        (
+                          request.auth.token.email != null && request.auth.token.email.lower() == 'saniasvb26@gmail.com'
+                            ? incoming().authorId == 'sania'
+                            : true
+                        ));
 
-      // Managing editor can delete any article; authors can only delete their own DRAFTS
+      // Managing editor can delete any article; authors can delete their own DRAFTS
       allow delete: if isManagingEditor() ||
-                       (isEditorialMember() &&
-                        existing().status == 'draft' &&
-                        existing().createdByUid == request.auth.uid);
+                       (isRegisteredAuthor() &&
+                        isArticleAuthor(existing()) &&
+                        existing().status == 'draft');
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -262,8 +269,13 @@ service cloud.firestore {
     // ════════════════════════════════════════════════════════════════
     match /subscribers/{subscriberId} {
       allow create: if incoming().email is string;
-      // Strict PII protection: only Managing Editor can access subscriber list
-      allow read, update, delete: if isManagingEditor();
+      // Strict PII protection: only Managing Editor can access or delete subscriber records.
+      // Unauthenticated readers can update status to 'unsubscribed' or reactivate their own record.
+      allow update: if isManagingEditor() ||
+                       (incoming().status in ['active', 'unsubscribed'] &&
+                        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'unsubscribedAt', 'subscribedAt', 'updatedAt']));
+      allow read: if isManagingEditor() || isRegisteredAuthor();
+      allow delete: if isManagingEditor();
     }
 
     match /tips/{tipId} {

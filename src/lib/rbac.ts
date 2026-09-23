@@ -141,7 +141,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<EditorialRole, Record<Permission, 
     'article:leave_comments': false,
     'article:request_revisions': false,
     'article:approve': false,
-    'article:publish': false,
+    'article:publish': true, // Authors can publish their own articles directly
     'article:schedule': false,
     'article:delete': false, // Cannot delete published articles; only own unpublished drafts
     'featured:manage': false,
@@ -356,8 +356,8 @@ export const rbac = {
       return false;
     }
 
-    // Authors can only edit their OWN unpublished drafts
-    if (user.role === 'author' && article.status === 'draft') {
+    // Authors can edit their OWN articles (both drafts and published articles)
+    if (user.role === 'author') {
       const isOwnerByAuthorId = article.authorId && user.authorId && article.authorId === user.authorId;
       const isOwnerByName = article.authorName && user.displayName && 
         article.authorName.trim().toLowerCase() === user.displayName.trim().toLowerCase();

@@ -54,7 +54,7 @@ export interface Article {
   updatedAt: number;
   views: number;
   isFeatured: boolean;
-  featuredOrder?: number; // Order index for the 3-card horizontal featured layout (1 | 2 | 3)
+  featuredOrder?: number; // Order index for the 4-card horizontal featured layout (1 | 2 | 3 | 4)
   isPinned: boolean;
   sources: Source[];
   relatedArticles?: string[]; // IDs of related articles
@@ -70,6 +70,11 @@ export interface Article {
   metaTitle?: string;
   metaDescription?: string;
   canonicalUrl?: string;
+  newsletterSent?: boolean;
+  newsletterSentAt?: number;
+  newsletterSentCount?: number;
+  newsletterStatus?: 'pending' | 'sent' | 'failed' | 'skipped';
+  newsletterError?: string;
 }
 
 export type EditorialRole = 'owner' | 'admin' | 'author' | 'reviewer' | 'guest_reviewer';
@@ -597,6 +602,10 @@ export interface Subscriber {
   subscribedAt?: number | string;
   location?: string;
   source?: string;
+  status?: 'active' | 'unsubscribed';
+  unsubscribedAt?: number;
+  lastEmailSentAt?: number;
+  unsubscribeToken?: string;
 }
 
 
