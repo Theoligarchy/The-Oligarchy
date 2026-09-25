@@ -36,10 +36,7 @@ function parseFirestoreDoc(doc) {
     content: parseFirestoreValue(fields.content) || '',
     featuredImage: parseFirestoreValue(fields.featuredImage) || '',
     date: parseFirestoreValue(fields.originalPublishedAt) || parseFirestoreValue(fields.publishDate) || parseFirestoreValue(fields.date) || parseFirestoreValue(fields.publishedAt) || '',
-    author: (() => {
-      const a = parseFirestoreValue(fields.authorName) || parseFirestoreValue(fields.author) || (parseFirestoreValue(fields.authorId) === 'sania' ? 'Sania' : 'Priyasha Priyal Jena');
-      return (typeof a === 'string' && a.toLowerCase() === 'sania') ? 'Sania' : a;
-    })(),
+    author: parseFirestoreValue(fields.authorName) || parseFirestoreValue(fields.author) || 'Priyasha Priyal Jena',
     category: parseFirestoreValue(fields.category) || 'Criminology',
     readTime: parseFirestoreValue(fields.readTime) || '10 min read',
     updateTime: doc.updateTime || new Date().toISOString()

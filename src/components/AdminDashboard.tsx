@@ -13,7 +13,7 @@ import {
   query 
 } from 'firebase/firestore';
 import { signOut, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
-import { Article, ReadingItem, ResearchTip, ArticleVersion, PeerAnnotation, ManuscriptSubmission, CoAuthor, EditorialRole, EditorialUser, AuthorProfile } from '../types';
+import { Article, ReadingItem, ResearchTip, ArticleVersion, PeerAnnotation, ManuscriptSubmission, CoAuthor, EditorialRole, EditorialUser, AuthorProfile, ResearchContributor, EditorialReviewer } from '../types';
 import QuillEditor from './QuillEditor';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import ReviewQueuePipeline from './ReviewQueuePipeline';
@@ -26,6 +26,11 @@ import ReviewInvitationsManager from './ReviewInvitationsManager';
 import AuditLogsViewer from './AuditLogsViewer';
 import DeploymentDiagnostics from './DeploymentDiagnostics';
 import NewsletterDispatchPreview from './NewsletterDispatchPreview';
+import AdminDashboardOverview from './AdminDashboardOverview';
+import MediaLibrary from './MediaLibrary';
+import ArticlePreviewModal from './ArticlePreviewModal';
+import ArticleScheduleModal from './ArticleScheduleModal';
+import FeaturedManager from './FeaturedManager';
 import { EmptyState } from './EmptyState';
 import { fetchContributors } from '../utils/contributors';
 import { rbac, ROLE_LABELS, resolveEditorialUser } from '../lib/rbac';
@@ -79,7 +84,10 @@ import {
   EyeOff,
   Calendar,
   AlertTriangle,
-  Star
+  Star,
+  LayoutDashboard,
+  Image as ImageIcon,
+  Archive
 } from 'lucide-react';
 
 // Helper to recursively scrub undefined values from object payloads before sending to Firestore
@@ -115,8 +123,29 @@ interface AdminDashboardProps {
   isOwner?: boolean;
 }
 
+export type AdminTab =
+  | 'dashboard'
+  | 'articles'
+  | 'write'
+  | 'featured'
+  | 'reading'
+  | 'authors'
+  | 'subscribers'
+  | 'pitches'
+  | 'analytics'
+  | 'site_content'
+  | 'media'
+  | 'settings'
+  | 'tips'
+  | 'discourse'
+  | 'team'
+  | 'contributor_dashboard'
+  | 'invitations'
+  | 'audit_logs'
+  | 'deployment';
+
 export default function AdminDashboard({ onLogout, allArticles, refreshArticles, editorialUser, isOwner: propIsOwner }: AdminDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'articles' | 'write' | 'authors' | 'pitches' | 'tips' | 'reading' | 'analytics' | 'settings' | 'subscribers' | 'discourse' | 'team' | 'contributor_dashboard' | 'invitations' | 'audit_logs' | 'site_content' | 'deployment'>('articles');
+  const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
   
   // Editorial RBAC & Persona Simulation States
   const [currentUser, setCurrentUser] = useState<EditorialUser | null>(() => {
@@ -198,6 +227,32 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
   const [newCoAffiliation, setNewCoAffiliation] = useState('');
   const [newCoOrcid, setNewCoOrcid] = useState('');
   const [newCoEmail, setNewCoEmail] = useState('');
+
+  // Future Attribution Architecture: Research Contributors & Editorial Reviewers
+  const [researchContributors, setResearchContributors] = useState<ResearchContributor[]>([]);
+  const [newRcName, setNewRcName] = useState('');
+  const [newRcRole, setNewRcRole] = useState('');
+  const [newRcAffiliation, setNewRcAffiliation] = useState('');
+  const [newRcOrcid, setNewRcOrcid] = useState('');
+
+  const [editorialReviewers, setEditorialReviewers] = useState<EditorialReviewer[]>([]);
+  const [newErName, setNewErName] = useState('');
+  const [newErRole, setNewErRole] = useState('');
+  const [newErAffiliation, setNewErAffiliation] = useState('');
+
+  // Reading stack attachment toggle for active post
+  const [includeInReadingStack, setIncludeInReadingStack] = useState(false);
+
+  // Scheduled date input for write editor
+  const [scheduledAtInput, setScheduledAtInput] = useState('');
+
+  // Modals for article preview and scheduling
+  const [previewArticleModal, setPreviewArticleModal] = useState<Article | null>(null);
+  const [scheduleArticleModal, setScheduleArticleModal] = useState<Article | null>(null);
+
+  // Editor Save State Machine ('saved' | 'saving' | 'unsaved')
+  const [editorSaveState, setEditorSaveState] = useState<'saved' | 'saving' | 'unsaved'>('saved');
+
   const [sources, setSources] = useState<Array<{ category: any; title: string; url?: string; citation?: string }>>([]);
   const [selectedVersionIndex, setSelectedVersionIndex] = useState<number | null>(null);
 
@@ -219,7 +274,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
   // Articles Tab Search & Filter States
   const [articleSearchQuery, setArticleSearchQuery] = useState('');
   const [articleCategoryFilter, setArticleCategoryFilter] = useState<'all' | 'criminology' | 'psyche' | 'politics'>('all');
-  const [articleStatusFilter, setArticleStatusFilter] = useState<'all' | 'published' | 'draft'>('all');
+  const [articleStatusFilter, setArticleStatusFilter] = useState<'all' | 'published' | 'draft' | 'scheduled' | 'archived'>('all');
 
   // Reading Stack list
   const [readingStack, setReadingStack] = useState<ReadingItem[]>([]);
@@ -1014,11 +1069,53 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
 
   const removeCoAuthorItem = (index: number) => {
     setCoAuthors(coAuthors.filter((_, i) => i !== index));
+    setEditorSaveState('unsaved');
+  };
+
+  const addResearchContributorItem = () => {
+    if (!newRcName.trim()) return;
+    const item: ResearchContributor = {
+      name: newRcName.trim(),
+      role: (newRcRole.trim() && !isPlaceholderText(newRcRole)) ? newRcRole.trim() : undefined,
+      institution: (newRcAffiliation.trim() && !isPlaceholderText(newRcAffiliation)) ? newRcAffiliation.trim() : undefined,
+      orcid: (newRcOrcid.trim() && !isPlaceholderText(newRcOrcid)) ? newRcOrcid.trim() : undefined
+    };
+    setResearchContributors([...researchContributors, item]);
+    setNewRcName('');
+    setNewRcRole('');
+    setNewRcAffiliation('');
+    setNewRcOrcid('');
+    setEditorSaveState('unsaved');
+  };
+
+  const removeResearchContributorItem = (index: number) => {
+    setResearchContributors(researchContributors.filter((_, i) => i !== index));
+    setEditorSaveState('unsaved');
+  };
+
+  const addEditorialReviewerItem = () => {
+    if (!newErName.trim()) return;
+    const item: EditorialReviewer = {
+      name: newErName.trim(),
+      role: (newErRole.trim() && !isPlaceholderText(newErRole)) ? newErRole.trim() : 'Peer Reviewer',
+      institution: (newErAffiliation.trim() && !isPlaceholderText(newErAffiliation)) ? newErAffiliation.trim() : undefined
+    };
+    setEditorialReviewers([...editorialReviewers, item]);
+    setNewErName('');
+    setNewErRole('');
+    setNewErAffiliation('');
+    setEditorSaveState('unsaved');
+  };
+
+  const removeEditorialReviewerItem = (index: number) => {
+    setEditorialReviewers(editorialReviewers.filter((_, i) => i !== index));
+    setEditorSaveState('unsaved');
   };
 
   // Auto save draft locally for crash recovery
   const triggerAutoSave = () => {
-    if (!content || content === lastSavedContent.current || content === '<p><br></p>') return;
+    if (!title && !content) return;
+    setEditorSaveState('saving');
     
     const draftData = {
       title,
@@ -1028,15 +1125,35 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
       category,
       tags,
       slug,
+      featuredImage,
+      canvaEmbed,
+      pdfLink,
+      authorId,
+      authorName,
+      authorOrcid,
+      doi,
+      coAuthors,
+      researchContributors,
+      editorialReviewers,
+      includeInReadingStack,
+      sources,
       metaTitle,
       metaDescription,
       canonicalUrl,
       savedAt: Date.now()
     };
-    localStorage.setItem('tol_autosave_recovery', JSON.stringify(draftData));
-    lastSavedContent.current = content;
-    setAutoSaveActive(true);
-    setTimeout(() => setAutoSaveActive(false), 3000);
+    try {
+      localStorage.setItem('tol_autosave_recovery', JSON.stringify(draftData));
+      lastSavedContent.current = content;
+      setAutoSaveActive(true);
+      setTimeout(() => {
+        setEditorSaveState('saved');
+        setAutoSaveActive(false);
+      }, 400);
+    } catch (e) {
+      console.error('Autosave error:', e);
+      setEditorSaveState('unsaved');
+    }
   };
 
   const restoreRecoveryDraft = () => {
@@ -1051,12 +1168,25 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
         setCategory(parsed.category || 'criminology');
         setTags(parsed.tags || []);
         setSlug(parsed.slug || '');
+        setFeaturedImage(parsed.featuredImage || '');
+        setCanvaEmbed(parsed.canvaEmbed || '');
+        setPdfLink(parsed.pdfLink || '');
+        setAuthorId(parsed.authorId || 'priyasha-priyal-jena');
+        setAuthorName(parsed.authorName || 'Priyasha Priyal Jena');
+        setAuthorOrcid(parsed.authorOrcid || '');
+        setDoi(parsed.doi || '');
+        setCoAuthors(parsed.coAuthors || []);
+        setResearchContributors(parsed.researchContributors || []);
+        setEditorialReviewers(parsed.editorialReviewers || []);
+        setIncludeInReadingStack(Boolean(parsed.includeInReadingStack));
+        setSources(parsed.sources || []);
         setMetaTitle(parsed.metaTitle || '');
         setMetaDescription(parsed.metaDescription || '');
         setCanonicalUrl(parsed.canonicalUrl || '');
         
         localStorage.removeItem('tol_autosave_recovery');
-        setAlert({ text: 'Crash draft restored successfully.', type: 'success' });
+        setEditorSaveState('saved');
+        setAlert({ text: 'Crash draft restored successfully into workspace.', type: 'success' });
       } catch (e) {
         console.error(e);
       }
@@ -1161,13 +1291,18 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
       pdfLink: sanitized.pdfLink,
       authorId: resolvedAuthorId,
       authorName: resolvedAuthorName,
+      primaryAuthorId: resolvedAuthorId,
+      primaryAuthorName: resolvedAuthorName,
       authorOrcid: resolvedAuthorOrcid || undefined,
       createdByUid: existingArt?.createdByUid || currentUser?.uid || auth.currentUser?.uid,
       createdByEmail: existingArt?.createdByEmail || currentUser?.email || auth.currentUser?.email || undefined,
       doi: sanitized.doi,
-      coAuthors: sanitized.coAuthors || existingArt?.coAuthors || [],
-      researchContributors: existingArt?.researchContributors || [],
-      editorialReviewers: existingArt?.editorialReviewers || [],
+      coAuthors: coAuthors || existingArt?.coAuthors || [],
+      coAuthorIds: (coAuthors || []).map(c => c.name.toLowerCase().replace(/[^a-z0-9]/g, '-')),
+      researchContributors: researchContributors || existingArt?.researchContributors || [],
+      researchContributorIds: (researchContributors || []).map(c => c.name.toLowerCase().replace(/[^a-z0-9]/g, '-')),
+      editorialReviewers: editorialReviewers || existingArt?.editorialReviewers || [],
+      reviewerIds: (editorialReviewers || []).map(c => c.name.toLowerCase().replace(/[^a-z0-9]/g, '-')),
       readTime: computedReadTime,
       excerpt: sanitized.excerpt || (sanitized.title || title.trim()),
       content: sanitized.content || content,
@@ -1245,6 +1380,24 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
           }
         }
       }
+
+      // Sync with Reading Stack if requested
+      if (includeInReadingStack) {
+        const existsInReading = readingStack.some(b => b.title.toLowerCase() === articleData.title.toLowerCase() || (b.link && b.link.includes(articleData.slug)));
+        if (!existsInReading) {
+          await addDoc(collection(db, 'reading'), cleanUndefined({
+            title: articleData.title,
+            author: articleData.authorName || 'Priyasha Priyal Jena',
+            category: articleData.category,
+            link: `/post/${articleData.slug}`,
+            addedAt: Date.now()
+          })).catch(console.error);
+          await loadReadingStack();
+        }
+      }
+
+      setEditorSaveState('saved');
+      localStorage.removeItem('tol_autosave_recovery');
 
       setAlert({ 
         text: `Manuscript saved successfully as ${currentStatus.toUpperCase()}${currentStatus === 'published' ? ' (Live on site)' : ''}.`, 
@@ -1337,6 +1490,18 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
     setNewCoAffiliation('');
     setNewCoOrcid('');
     setNewCoEmail('');
+    setResearchContributors([]);
+    setNewRcName('');
+    setNewRcRole('');
+    setNewRcAffiliation('');
+    setNewRcOrcid('');
+    setEditorialReviewers([]);
+    setNewErName('');
+    setNewErRole('');
+    setNewErAffiliation('');
+    setIncludeInReadingStack(false);
+    setScheduledAtInput('');
+    setEditorSaveState('saved');
     setSources([]);
     setSelectedVersionIndex(null);
     setAiMetadataReasoning(null);
@@ -1381,6 +1546,18 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
     setNewCoAffiliation('');
     setNewCoOrcid('');
     setNewCoEmail('');
+    setResearchContributors(art.researchContributors || []);
+    setNewRcName('');
+    setNewRcRole('');
+    setNewRcAffiliation('');
+    setNewRcOrcid('');
+    setEditorialReviewers(art.editorialReviewers || []);
+    setNewErName('');
+    setNewErRole('');
+    setNewErAffiliation('');
+    setIncludeInReadingStack(readingStack.some(b => b.title.toLowerCase() === art.title.toLowerCase() || (b.link && b.link.includes(art.slug))));
+    setScheduledAtInput(art.scheduledAt ? new Date(art.scheduledAt).toISOString().slice(0, 16) : '');
+    setEditorSaveState('saved');
     setSources(art.sources || []);
     setSelectedVersionIndex(null);
     setMetaTitle(art.metaTitle || art.seoTitle || '');
@@ -1457,6 +1634,73 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
       await refreshArticles();
     } catch (e: any) {
       setAlert({ text: `Duplication failed: ${e.message}`, type: 'error' });
+    }
+  };
+
+  const handleSaveSchedule = async (articleId: string, scheduledTimestamp: number | null) => {
+    try {
+      const artRef = doc(db, 'articles', articleId);
+      if (scheduledTimestamp) {
+        await updateDoc(artRef, {
+          status: 'scheduled',
+          scheduledAt: scheduledTimestamp,
+          updatedAt: Date.now()
+        });
+        setAlert({ 
+          text: `Article scheduled for ${new Date(scheduledTimestamp).toLocaleString('en-GB')}.`, 
+          type: 'success' 
+        });
+      } else {
+        await updateDoc(artRef, {
+          status: 'draft',
+          scheduledAt: null,
+          updatedAt: Date.now()
+        });
+        setAlert({ text: 'Schedule cleared. Manuscript reverted to Draft.', type: 'success' });
+      }
+      await refreshArticles();
+    } catch (e: any) {
+      setAlert({ text: `Failed to update schedule: ${e.message}`, type: 'error' });
+      throw e;
+    }
+  };
+
+  const handleArchiveArticle = async (art: Article) => {
+    try {
+      const newStatus = art.status === 'archived' ? 'draft' : 'archived';
+      await updateDoc(doc(db, 'articles', art.id), {
+        status: newStatus,
+        updatedAt: Date.now()
+      });
+      setAlert({ 
+        text: `Article "${art.title}" ${newStatus === 'archived' ? 'archived' : 'unarchived to draft'}.`, 
+        type: 'success' 
+      });
+      await refreshArticles();
+    } catch (e: any) {
+      setAlert({ text: `Archive operation failed: ${e.message}`, type: 'error' });
+    }
+  };
+
+  const handleToggleReadingStack = async (art: Article) => {
+    try {
+      const match = readingStack.find(b => b.title.toLowerCase() === art.title.toLowerCase() || (b.link && b.link.includes(art.slug)));
+      if (match) {
+        await deleteDoc(doc(db, 'reading', match.id));
+        setAlert({ text: `Removed "${art.title}" from Reading Stack.`, type: 'success' });
+      } else {
+        await addDoc(collection(db, 'reading'), cleanUndefined({
+          title: art.title,
+          author: art.authorName || 'Priyasha Priyal Jena',
+          category: art.category,
+          link: `/post/${art.slug}`,
+          addedAt: Date.now()
+        }));
+        setAlert({ text: `Added "${art.title}" to Reading Stack.`, type: 'success' });
+      }
+      await loadReadingStack();
+    } catch (e: any) {
+      setAlert({ text: `Failed to update Reading Stack: ${e.message}`, type: 'error' });
     }
   };
 
@@ -1782,39 +2026,34 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
 
         <nav className="flex flex-row md:flex-col overflow-x-auto md:overflow-x-visible divide-x md:divide-x-0 md:divide-y divide-paper/5 py-2 md:py-4 shrink-0">
           {[
-            { id: 'articles', label: !isOwnerUser && effectiveRole === 'author' ? '📋 My Manuscripts' : !isOwnerUser && effectiveRole === 'reviewer' ? '📋 Scholarly Corpus' : '📋 All Articles & Posts', roles: ['owner', 'admin', 'reviewer', 'author'] },
-            { id: 'write', label: editingId ? '✏ Edit Article' : (!isOwnerUser && effectiveRole === 'author' ? '✏ Write Manuscript' : '✏ Write Post'), roles: ['owner', 'admin', 'author'] },
-            { id: 'authors', label: `👥 Authors (${contributors.length})`, roles: ['owner', 'admin'] },
-            { id: 'featured_slots', label: '⭐ Featured Posts (3)', roles: ['owner', 'admin'] },
-            { id: 'reading', label: '📚 Reading Stack', roles: ['owner', 'admin', 'reviewer'] },
-            { id: 'analytics', label: '📊 Audience Analytics & Traffic', roles: ['owner', 'admin'] },
-            { id: 'contributor_dashboard', label: !isOwnerUser && effectiveRole === 'author' ? '📈 Scholar Overview' : '📈 Article Performance & Metrics', roles: ['owner', 'admin', 'author'] },
-            { id: 'site_content', label: '🌐 Site Settings & CMS', roles: ['owner', 'admin'] },
-            { id: 'settings', label: '⚙ Admin Settings & Password', roles: ['owner'] },
-            { id: 'deployment', label: '🚀 Deployment & Database', roles: ['owner'] },
-            { id: 'team', label: '🛡️ Editorial Staff & RBAC', roles: ['owner', 'admin'] },
-            { id: 'invitations', label: '🔑 Reviewer Invites', roles: ['owner', 'admin'] },
-            { id: 'audit_logs', label: '📜 Security Audit Trail', roles: ['owner'] },
-            { id: 'pitches', label: !isOwnerUser && effectiveRole === 'author' ? `📑 My Submissions (${pendingPitchesCount})` : `📑 Review Queue${pendingPitchesCount > 0 ? ` (${pendingPitchesCount})` : ''}`, roles: ['owner', 'admin', 'reviewer', 'author'] },
-            { id: 'tips', label: `📬 Whistleblower Tips (${tips.filter(t => !t.isRead).length})`, roles: ['owner', 'admin'] },
+            { id: 'dashboard', label: '📊 Dashboard', roles: ['owner', 'admin'] },
+            { id: 'articles', label: `📋 Articles (${allArticles.length})`, roles: ['owner', 'admin', 'reviewer', 'author'] },
+            { id: 'write', label: editingId ? '✏ Edit Article' : '✏ Write Article', roles: ['owner', 'admin', 'author'] },
+            { id: 'featured', label: `⭐ Featured (${allArticles.filter(a => a.isFeatured).length}/3)`, roles: ['owner', 'admin'] },
+            { id: 'reading', label: `📚 Reading Stack (${readingStack.length})`, roles: ['owner', 'admin', 'reviewer'] },
+            { id: 'authors', label: `👥 Authors & Credits (${contributors.length})`, roles: ['owner', 'admin'] },
             { id: 'subscribers', label: `📧 Subscribers (${subscribers.length})`, roles: ['owner', 'admin'] },
-            { id: 'discourse', label: `💬 Peer Marginalia (${unverifiedReviewsCount})`, roles: ['owner', 'admin', 'reviewer'] }
+            { id: 'pitches', label: `📑 Review Queue${pendingPitchesCount > 0 ? ` (${pendingPitchesCount})` : ''}`, roles: ['owner', 'admin', 'reviewer', 'author'] },
+            { id: 'analytics', label: '📈 Analytics', roles: ['owner', 'admin'] },
+            { id: 'site_content', label: '🌐 Site Content / CMS', roles: ['owner', 'admin'] },
+            { id: 'media', label: '🖼 Media Library', roles: ['owner', 'admin'] },
+            { id: 'settings', label: '⚙ Settings & Security', roles: ['owner'] },
+            { id: 'tips', label: `📬 Whistleblower Tips (${tips.filter(t => !t.isRead).length})`, roles: ['owner', 'admin'] },
+            { id: 'discourse', label: `💬 Peer Marginalia (${unverifiedReviewsCount})`, roles: ['owner', 'admin', 'reviewer'] },
+            { id: 'audit_logs', label: '📜 Security Audit Trail', roles: ['owner'] },
+            { id: 'deployment', label: '🚀 Database Diagnostics', roles: ['owner'] }
           ]
             .filter(tab => isOwnerUser || tab.roles.includes(effectiveRole))
             .map((tab) => (
             <button
               key={tab.id}
               onClick={() => {
-                if (tab.id === 'featured_slots') {
-                  setShowFeaturedSlotsModal(true);
-                  return;
-                }
                 setActiveTab(tab.id as any);
                 setAlert(null);
               }}
               className={`font-sans text-[10px] font-semibold tracking-widest uppercase text-left py-3.5 px-5 md:px-6 w-full whitespace-nowrap md:border-l-2 transition-all cursor-pointer ${
                 activeTab === tab.id 
-                  ? 'bg-blood/10 text-paper border-blood' 
+                  ? 'bg-blood/10 text-paper border-blood font-bold' 
                   : 'text-paper/45 hover:bg-paper/[0.02] border-transparent'
               }`}
             >
@@ -1828,10 +2067,10 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
           <div className="flex items-center justify-between">
             <div className="flex flex-col">
               <span className="font-serif text-xs text-paper/80 font-bold truncate max-w-36">
-                {currentUser?.displayName || auth.currentUser?.email}
+                {currentUser?.displayName || auth.currentUser?.email || 'Priyasha Priyal Jena'}
               </span>
-              <span className={`font-sans text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.2 rounded-xs border w-fit mt-0.5 ${roleMeta.color}`}>
-                {roleMeta.badge}
+              <span className="font-sans text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.2 rounded-xs border w-fit mt-0.5 border-blood/40 text-blood bg-blood/10">
+                OWNER / FOUNDER
               </span>
             </div>
             <button 
@@ -1853,83 +2092,71 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-paper/10 pb-5 gap-4">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <span className={`font-sans text-[8px] font-bold tracking-widest uppercase px-2 py-0.5 rounded-xs border ${roleMeta.color}`}>
-                  {isOwnerUser && !simulatedRole ? 'FOUNDER / OWNER' : roleMeta.badge}
+                <span className="font-sans text-[8px] font-bold tracking-widest uppercase px-2 py-0.5 rounded-xs border border-blood/40 text-blood bg-blood/10">
+                  FOUNDER &amp; OWNER CMS
                 </span>
                 <span className="font-sans text-[8px] text-paper/30 uppercase tracking-widest">
-                  {isOwnerUser && !simulatedRole ? 'theoligarchy.in • Full Administrative Console' : 'theoligarchy.in • Role-Based Editorial Workspace'}
+                  theoligarchy.in • Priyasha Priyal Jena
                 </span>
               </div>
               <h2 className="font-display text-2xl font-semibold italic text-paper/90 capitalize">
-                {activeTab === 'articles' ? (!isOwnerUser && effectiveRole === 'author' ? 'My Manuscripts' : 'All Articles & Posts') :
-                 activeTab === 'write' ? (editingId ? 'Edit Article' : (!isOwnerUser && effectiveRole === 'author' ? 'Compose Manuscript' : 'Write Post')) :
-                 activeTab === 'authors' ? 'Authors & Contributors' :
+                {activeTab === 'dashboard' ? 'Editorial Command Dashboard' :
+                 activeTab === 'articles' ? 'Publication Corpus & Articles' :
+                 activeTab === 'write' ? (editingId ? 'Edit Manuscript' : 'Write Post') :
+                 activeTab === 'featured' ? 'Featured Research Configuration' :
+                 activeTab === 'media' ? 'Media Library & Imagery' :
+                 activeTab === 'authors' ? 'Authors & Academic Credits' :
                  activeTab === 'reading' ? 'Reading Stack' :
                  activeTab === 'analytics' ? 'Platform Analytics & Live Metrics' :
                  activeTab === 'site_content' ? 'Site Content & CMS' :
                  activeTab === 'settings' ? 'Admin Account & Security Settings' :
                  activeTab === 'deployment' ? 'Deployment Guide & Database Diagnostics' :
-                 activeTab === 'team' ? 'Editorial Staff & RBAC Registry' :
-                 activeTab === 'invitations' ? 'Reviewer & Staff Invites' :
-                 activeTab === 'audit_logs' ? 'Security Audit Trail' :
-                 activeTab === 'pitches' ? 'Review Queue' :
+                 activeTab === 'pitches' ? 'Review Queue & Manuscript Submissions' :
                  activeTab === 'tips' ? 'Whistleblower Tips' :
                  activeTab === 'subscribers' ? 'Newsletter Mailing List' :
                  activeTab === 'discourse' ? 'Peer Marginalia & Discourse' :
-                 activeTab === 'contributor_dashboard' ? 'Contributor Hub & Analytics' :
                  `${activeTab} Panel`}
               </h2>
             </div>
 
-            {/* Persona Simulator & Quick Actions */}
+            {/* Save Status & Quick Actions */}
             <div className="flex flex-wrap items-center gap-3">
-              {/* Interactive Role Switcher for testing roles: available to Owner / Admin */}
-              {isRealAdmin && (
-                <div className="flex items-center gap-1 bg-ink border border-paper/15 p-1 rounded-sm shadow-xs">
-                  <span className="font-sans text-[8px] font-bold uppercase tracking-wider text-paper/40 px-1.5 flex items-center gap-1">
-                    <ShieldCheck size={10} className="text-blood" />
-                    Role View:
-                  </span>
-                  {(['admin', 'reviewer', 'author'] as EditorialRole[]).map((r) => {
-                    const isCurrent = effectiveRole === r;
-                    return (
-                      <button
-                        key={r}
-                        onClick={() => handleSwitchSimulatedRole(simulatedRole === r ? null : r)}
-                        className={`font-sans text-[8px] font-bold uppercase tracking-wider px-2 py-1 rounded-xs transition-all cursor-pointer ${
-                          isCurrent 
-                            ? 'bg-blood text-paper shadow-xs' 
-                            : 'text-paper/40 hover:text-paper hover:bg-paper/5'
-                        }`}
-                        title={`Preview workspace with ${ROLE_LABELS[r].title} permissions`}
-                      >
-                        {r === 'admin' ? 'Editor View' : r === 'reviewer' ? 'Reviewer' : 'Author'}
-                      </button>
-                    );
-                  })}
-                  {simulatedRole && (
-                    <button
-                      onClick={() => handleSwitchSimulatedRole(null)}
-                      className="font-sans text-[8px] font-bold uppercase tracking-wider px-2 py-1 bg-blood/30 hover:bg-blood/50 text-paper rounded-xs transition-all cursor-pointer"
-                      title="Return to Owner view"
-                    >
-                      Reset (Owner)
-                    </button>
+              {activeTab === 'write' && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm border border-paper/10 bg-ink text-[10px] font-sans font-semibold tracking-wider uppercase transition-all">
+                  {editorSaveState === 'saved' ? (
+                    <span className="text-[#8bc4a8] flex items-center gap-1">
+                      <Check size={11} className="text-[#8bc4a8]" /> Draft Saved
+                    </span>
+                  ) : editorSaveState === 'saving' ? (
+                    <span className="text-amber-400 flex items-center gap-1">
+                      <RefreshCw size={11} className="animate-spin text-amber-400" /> Saving...
+                    </span>
+                  ) : (
+                    <span className="text-amber-300 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block animate-pulse" /> Unsaved changes
+                    </span>
                   )}
                 </div>
               )}
 
-              {autoSaveActive && (
-                <span className="font-serif text-[10px] italic text-[#8bc4a8] bg-[#8bc4a8]/5 border border-[#8bc4a8]/10 px-2 py-1 rounded-sm flex items-center gap-1">
-                  <Check size={10} /> Auto-saved
-                </span>
-              )}
               {localStorage.getItem('tol_autosave_recovery') && activeTab === 'write' && (
                 <button 
                   onClick={restoreRecoveryDraft}
                   className="font-sans text-[9px] uppercase tracking-wider bg-blood/10 border border-blood/30 hover:bg-blood/20 text-paper px-3 py-1.5 rounded-sm cursor-pointer transition-colors"
                 >
                   Restore Crash Draft
+                </button>
+              )}
+
+              {activeTab !== 'write' && (
+                <button
+                  onClick={() => {
+                    clearWriteForm();
+                    setActiveTab('write');
+                  }}
+                  className="bg-blood hover:bg-blood/90 text-paper font-sans text-[9px] font-bold tracking-widest uppercase py-2 px-3.5 rounded-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors border border-blood/40"
+                >
+                  <Plus size={11} /> Write Article
                 </button>
               )}
             </div>
@@ -1945,6 +2172,51 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
               <span className="font-serif">{alert.text}</span>
               <button onClick={() => setAlert(null)} className="text-[14px] leading-none shrink-0 ml-4 font-bold opacity-50 hover:opacity-100 cursor-pointer">×</button>
             </div>
+          )}
+
+          {/* ══ TAB: OPERATIONAL DASHBOARD ══ */}
+          {activeTab === 'dashboard' && (
+            <AdminDashboardOverview
+              articles={allArticles}
+              subscribersCount={subscribers.length}
+              readingItems={readingStack}
+              contributors={contributors}
+              onNavigateTab={(tab) => {
+                setActiveTab(tab);
+                setAlert(null);
+              }}
+              onFilterArticles={(status) => {
+                setArticleStatusFilter(status);
+              }}
+              onEditArticle={handleEditArticle}
+              onPreviewArticle={(art) => setPreviewArticleModal(art)}
+              onComposeNew={() => {
+                clearWriteForm();
+                setActiveTab('write');
+              }}
+            />
+          )}
+
+          {/* ══ TAB: FEATURED POSTS MANAGER ══ */}
+          {activeTab === 'featured' && (
+            <FeaturedManager
+              articles={allArticles}
+              onSetFeaturedOrder={handleSetFeaturedOrder}
+              onPreviewArticle={(art) => setPreviewArticleModal(art)}
+            />
+          )}
+
+          {/* ══ TAB: MEDIA LIBRARY ══ */}
+          {activeTab === 'media' && (
+            <MediaLibrary
+              articles={allArticles}
+              onSelectImage={(url) => {
+                setFeaturedImage(url);
+                setAlert({ text: 'Image asset assigned as article cover image in editor.', type: 'success' });
+                setActiveTab('write');
+              }}
+              selectedImageUrl={featuredImage}
+            />
           )}
 
           {/* ══ TAB: CONTRIBUTOR HUB & SCHOLAR ANALYTICS ══ */}
@@ -2210,10 +2482,26 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
                       <input 
                         type="checkbox" 
                         checked={isPinned} 
-                        onChange={(e) => setIsPinned(e.target.checked)}
+                        onChange={(e) => {
+                          setIsPinned(e.target.checked);
+                          setEditorSaveState('unsaved');
+                        }}
                         className="accent-blood"
                       />
                       📌 Pin to top of list
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer font-sans text-[10px] uppercase tracking-wider text-paper/50 hover:text-paper transition-colors">
+                      <input 
+                        type="checkbox" 
+                        checked={includeInReadingStack} 
+                        onChange={(e) => {
+                          setIncludeInReadingStack(e.target.checked);
+                          setEditorSaveState('unsaved');
+                        }}
+                        className="accent-blood"
+                      />
+                      <span className="text-amber-400 font-bold">📚</span> Add to Reading Stack
                     </label>
                   </div>
                 </div>
@@ -2583,6 +2871,177 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
                             onClick={() => removeCoAuthorItem(idx)}
                             className="text-red-400 hover:text-red-300 ml-2 font-bold cursor-pointer text-xs"
                             title="Remove Co-Author"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Research Contributors & Field Investigators builder */}
+                <div className="pt-3 border-t border-paper/5">
+                  <span className="font-sans text-[9px] font-bold tracking-widest text-paper/50 uppercase block mb-3">
+                    + Research Contributors &amp; Specialists ({researchContributors.length} Attached)
+                  </span>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 items-end bg-navy/60 p-3 rounded-sm border border-paper/5">
+                    <div className="flex flex-col gap-1">
+                      <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">Contributor Name *</label>
+                      <input
+                        type="text"
+                        placeholder="Contributor name..."
+                        value={newRcName}
+                        onChange={(e) => {
+                          setNewRcName(e.target.value);
+                          setEditorSaveState('unsaved');
+                        }}
+                        className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">Role (e.g. Data Specialist)</label>
+                      <input
+                        type="text"
+                        placeholder="Specialist role..."
+                        value={newRcRole}
+                        onChange={(e) => {
+                          setNewRcRole(e.target.value);
+                          setEditorSaveState('unsaved');
+                        }}
+                        className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">Institution / Archive</label>
+                      <input
+                        type="text"
+                        placeholder="Institution or laboratory..."
+                        value={newRcAffiliation}
+                        onChange={(e) => {
+                          setNewRcAffiliation(e.target.value);
+                          setEditorSaveState('unsaved');
+                        }}
+                        className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">ORCID iD</label>
+                      <input
+                        type="text"
+                        placeholder="0000-0000-0000-0000"
+                        value={newRcOrcid}
+                        onChange={(e) => {
+                          setNewRcOrcid(e.target.value);
+                          setEditorSaveState('unsaved');
+                        }}
+                        className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs font-mono"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addResearchContributorItem}
+                      className="bg-blue-500/10 hover:bg-blue-500/20 border border-blue-400/40 text-blue-300 font-sans text-[9px] font-bold tracking-widest uppercase py-2 px-3 rounded-xs flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <Plus size={11} /> Add Contributor
+                    </button>
+                  </div>
+
+                  {researchContributors.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {researchContributors.map((rc, idx) => (
+                        <div key={idx} className="flex items-center gap-2 bg-navy border border-paper/15 px-3 py-1.5 rounded-sm text-xs text-paper">
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-paper font-serif">{rc.name}</span>
+                            <span className="font-sans text-[9px] text-paper/40">
+                              {rc.role || 'Research Contributor'} {rc.institution ? `· ${rc.institution}` : ''}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeResearchContributorItem(idx)}
+                            className="text-red-400 hover:text-red-300 ml-2 font-bold cursor-pointer text-xs"
+                            title="Remove Contributor"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Editorial Reviewers & Peer Scholars builder */}
+                <div className="pt-3 border-t border-paper/5">
+                  <span className="font-sans text-[9px] font-bold tracking-widest text-paper/50 uppercase block mb-3">
+                    + Editorial Reviewers &amp; Methodologists ({editorialReviewers.length} Attached)
+                  </span>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 items-end bg-navy/60 p-3 rounded-sm border border-paper/5">
+                    <div className="flex flex-col gap-1">
+                      <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">Reviewer Name *</label>
+                      <input
+                        type="text"
+                        placeholder="Reviewer scholar name..."
+                        value={newErName}
+                        onChange={(e) => {
+                          setNewErName(e.target.value);
+                          setEditorSaveState('unsaved');
+                        }}
+                        className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">Role (e.g. Peer Reviewer)</label>
+                      <input
+                        type="text"
+                        placeholder="Peer Reviewer..."
+                        value={newErRole}
+                        onChange={(e) => {
+                          setNewErRole(e.target.value);
+                          setEditorSaveState('unsaved');
+                        }}
+                        className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="font-sans text-[8px] uppercase tracking-wider text-paper/40">Institution / Department</label>
+                      <input
+                        type="text"
+                        placeholder="Faculty / department..."
+                        value={newErAffiliation}
+                        onChange={(e) => {
+                          setNewErAffiliation(e.target.value);
+                          setEditorSaveState('unsaved');
+                        }}
+                        className="bg-midnight border border-paper/10 rounded-xs py-1.5 px-2 text-paper text-xs"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addEditorialReviewerItem}
+                      className="bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-sans text-[9px] font-bold tracking-widest uppercase py-2 px-3 rounded-xs flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <Plus size={11} /> Add Reviewer
+                    </button>
+                  </div>
+
+                  {editorialReviewers.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {editorialReviewers.map((er, idx) => (
+                        <div key={idx} className="flex items-center gap-2 bg-navy border border-paper/15 px-3 py-1.5 rounded-sm text-xs text-paper">
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-paper font-serif">{er.name}</span>
+                            <span className="font-sans text-[9px] text-paper/40">
+                              {er.role || 'Peer Reviewer'} {er.institution ? `· ${er.institution}` : ''}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeEditorialReviewerItem(idx)}
+                            className="text-red-400 hover:text-red-300 ml-2 font-bold cursor-pointer text-xs"
+                            title="Remove Reviewer"
                           >
                             ×
                           </button>
@@ -3347,30 +3806,46 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
                       </div>
 
                       {/* Status Pills */}
-                      <div className="inline-flex rounded-xs border border-paper/10 bg-midnight p-0.5">
+                      <div className="inline-flex flex-wrap rounded-xs border border-paper/10 bg-midnight p-0.5 gap-0.5">
                         <button
                           onClick={() => setArticleStatusFilter('all')}
-                          className={`font-sans text-[9px] uppercase tracking-wider px-2 py-1 rounded-xs transition-colors cursor-pointer ${
-                            articleStatusFilter === 'all' ? 'bg-blood text-paper' : 'text-paper/50 hover:text-paper'
+                          className={`font-sans text-[9px] uppercase tracking-wider px-2.5 py-1 rounded-xs transition-colors cursor-pointer ${
+                            articleStatusFilter === 'all' ? 'bg-blood text-paper font-bold' : 'text-paper/50 hover:text-paper'
                           }`}
                         >
-                          All Status
+                          All ({scopedArticles.length})
                         </button>
                         <button
                           onClick={() => setArticleStatusFilter('published')}
-                          className={`font-sans text-[9px] uppercase tracking-wider px-2 py-1 rounded-xs transition-colors cursor-pointer ${
-                            articleStatusFilter === 'published' ? 'bg-blood text-paper' : 'text-paper/50 hover:text-paper'
+                          className={`font-sans text-[9px] uppercase tracking-wider px-2.5 py-1 rounded-xs transition-colors cursor-pointer ${
+                            articleStatusFilter === 'published' ? 'bg-blood text-paper font-bold' : 'text-paper/50 hover:text-paper'
                           }`}
                         >
-                          Live
+                          Published ({scopedArticles.filter(a => a.status === 'published').length})
                         </button>
                         <button
                           onClick={() => setArticleStatusFilter('draft')}
-                          className={`font-sans text-[9px] uppercase tracking-wider px-2 py-1 rounded-xs transition-colors cursor-pointer ${
-                            articleStatusFilter === 'draft' ? 'bg-blood text-paper' : 'text-paper/50 hover:text-paper'
+                          className={`font-sans text-[9px] uppercase tracking-wider px-2.5 py-1 rounded-xs transition-colors cursor-pointer ${
+                            articleStatusFilter === 'draft' ? 'bg-blood text-paper font-bold' : 'text-paper/50 hover:text-paper'
                           }`}
                         >
-                          Draft
+                          Drafts ({scopedArticles.filter(a => a.status === 'draft').length})
+                        </button>
+                        <button
+                          onClick={() => setArticleStatusFilter('scheduled')}
+                          className={`font-sans text-[9px] uppercase tracking-wider px-2.5 py-1 rounded-xs transition-colors cursor-pointer ${
+                            articleStatusFilter === 'scheduled' ? 'bg-blood text-paper font-bold' : 'text-paper/50 hover:text-paper'
+                          }`}
+                        >
+                          Scheduled ({scopedArticles.filter(a => a.status === 'scheduled').length})
+                        </button>
+                        <button
+                          onClick={() => setArticleStatusFilter('archived')}
+                          className={`font-sans text-[9px] uppercase tracking-wider px-2.5 py-1 rounded-xs transition-colors cursor-pointer ${
+                            articleStatusFilter === 'archived' ? 'bg-blood text-paper font-bold' : 'text-paper/50 hover:text-paper'
+                          }`}
+                        >
+                          Archived ({scopedArticles.filter(a => a.status === 'archived').length})
                         </button>
                       </div>
 
@@ -3469,6 +3944,12 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
                                   Slot {art.featuredOrder || 1}
                                 </span>
                               )}
+                              {readingStack.some(b => b.title?.toLowerCase() === art.title?.toLowerCase() || (b.link && b.link.includes(art.slug))) && (
+                                <span className="inline-flex items-center gap-1 bg-amber-500/20 border border-amber-400/40 text-amber-300 text-[9px] font-sans font-bold px-1.5 py-0.5 rounded-xs mr-1.5 align-middle" title="Included in Reading Stack">
+                                  <BookOpen size={10} className="text-amber-400" />
+                                  Stack
+                                </span>
+                              )}
                               {art.title}
                               {art.subtitle && <span className="block text-xs font-normal text-paper/40 mt-0.5">{art.subtitle}</span>}
                               {art.authorName && <span className="block font-sans text-[9px] text-paper/35 mt-0.5">By {art.authorName}</span>}
@@ -3481,19 +3962,27 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
                                   className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-sm border cursor-pointer transition-colors ${
                                     art.status === 'published' 
                                       ? 'bg-green-950/10 text-[#8bc4a8] border-green-800/30 hover:border-green-500/50' 
+                                      : art.status === 'scheduled'
+                                      ? 'bg-blue-950/10 text-blue-400 border-blue-800/30 hover:border-blue-500/50'
+                                      : art.status === 'archived'
+                                      ? 'bg-paper/5 text-paper/40 border-paper/10 hover:border-paper/30'
                                       : 'bg-yellow-950/10 text-yellow-500 border-yellow-800/30 hover:border-yellow-500/50'
                                   }`}
-                                  title="Click to toggle draft/published"
+                                  title={art.status === 'published' ? 'Click to unpublish to Draft' : art.status === 'archived' ? 'Archived (click to toggle status)' : 'Click to toggle Draft/Published'}
                                 >
-                                  {art.status === 'published' ? 'Live' : 'Draft'}
+                                  {art.status === 'published' ? 'Live' : art.status === 'scheduled' ? 'Scheduled' : art.status === 'archived' ? 'Archived' : 'Draft'}
                                 </button>
                               ) : (
                                 <span className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-sm border ${
                                   art.status === 'published' 
                                     ? 'bg-green-950/10 text-[#8bc4a8] border-green-800/30' 
+                                    : art.status === 'scheduled'
+                                    ? 'bg-blue-950/10 text-blue-400 border-blue-800/30'
+                                    : art.status === 'archived'
+                                    ? 'bg-paper/5 text-paper/40 border-paper/10'
                                     : 'bg-yellow-950/10 text-yellow-500 border-yellow-800/30'
                                 }`}>
-                                  {art.status === 'published' ? 'Live' : 'Draft'}
+                                  {art.status === 'published' ? 'Live' : art.status === 'scheduled' ? 'Scheduled' : art.status === 'archived' ? 'Archived' : 'Draft'}
                                 </span>
                               )}
                             </td>
@@ -3529,7 +4018,14 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
                             </td>
                             <td className="py-4 px-4 font-mono text-xs text-paper/40">{art.views || 0}</td>
                             <td className="py-4 px-4 text-right">
-                              <div className="flex items-center justify-end gap-2">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button 
+                                  onClick={() => setPreviewArticleModal(art)}
+                                  className="p-1.5 border border-paper/10 text-paper/50 hover:text-paper hover:border-paper/30 transition-colors rounded-sm cursor-pointer"
+                                  title="Preview Manuscript"
+                                >
+                                  <Eye size={13} />
+                                </button>
                                 <button 
                                   onClick={() => setNotesArticleModal(art)}
                                   className="p-1.5 border border-paper/10 text-paper/50 hover:text-amber-300 hover:border-amber-400/40 transition-colors rounded-sm cursor-pointer"
@@ -3547,13 +4043,29 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
                                   </button>
                                 )}
                                 {(isOwnerUser || effectiveRole === 'admin') && (
-                                  <button 
-                                    onClick={() => handleDuplicateArticle(art)}
-                                    className="p-1.5 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood transition-colors rounded-sm cursor-pointer"
-                                    title="Duplicate Article"
-                                  >
-                                    <Copy size={13} />
-                                  </button>
+                                  <>
+                                    <button 
+                                      onClick={() => setScheduleArticleModal(art)}
+                                      className="p-1.5 border border-paper/10 text-paper/50 hover:text-blue-400 hover:border-blue-400/40 transition-colors rounded-sm cursor-pointer"
+                                      title={art.scheduledAt ? `Scheduled for ${new Date(art.scheduledAt).toLocaleString('en-GB')}` : "Schedule Publication"}
+                                    >
+                                      <Calendar size={13} />
+                                    </button>
+                                    <button 
+                                      onClick={() => handleArchiveArticle(art)}
+                                      className="p-1.5 border border-paper/10 text-paper/50 hover:text-amber-300 hover:border-amber-400/40 transition-colors rounded-sm cursor-pointer"
+                                      title={art.status === 'archived' ? 'Unarchive (Restore to Draft)' : 'Archive Manuscript'}
+                                    >
+                                      <Archive size={13} />
+                                    </button>
+                                    <button 
+                                      onClick={() => handleDuplicateArticle(art)}
+                                      className="p-1.5 border border-paper/10 text-paper/50 hover:text-blood hover:border-blood transition-colors rounded-sm cursor-pointer"
+                                      title="Duplicate Article"
+                                    >
+                                      <Copy size={13} />
+                                    </button>
+                                  </>
                                 )}
                                 {(isOwnerUser || rbac.canDeleteArticle(art, currentUser || { uid: auth.currentUser?.uid || '', email: auth.currentUser?.email || '', displayName: '', role: effectiveRole })) && (
                                   deleteConfirmArticleId === art.id ? (
@@ -4244,6 +4756,27 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
             />
           </div>
         </div>
+      )}
+
+      {/* Article Reader Appearance Modal */}
+      {previewArticleModal && (
+        <ArticlePreviewModal
+          article={previewArticleModal}
+          onClose={() => setPreviewArticleModal(null)}
+          onEdit={(art) => {
+            setPreviewArticleModal(null);
+            handleEditArticle(art);
+          }}
+        />
+      )}
+
+      {/* Article Publication Scheduler Modal */}
+      {scheduleArticleModal && (
+        <ArticleScheduleModal
+          article={scheduleArticleModal}
+          onClose={() => setScheduleArticleModal(null)}
+          onSaveSchedule={handleSaveSchedule}
+        />
       )}
 
       {/* Homepage 3-Card Featured Slots Curator Modal */}

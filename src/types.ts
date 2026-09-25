@@ -52,12 +52,17 @@ export interface Article {
   pdfLink?: string; // Research report PDF download link
   authorId: string;
   authorName: string;
+  primaryAuthorId?: string; // Explicit primary author ID (maps to authorId)
+  primaryAuthorName?: string; // Explicit primary author name (maps to authorName)
   authorTitle?: string;
   authorInstitution?: string;
   authorOrcid?: string; // e.g. "0000-0000-0000-0000"
   coAuthors?: CoAuthor[]; // Multi-author attribution for investigative series
+  coAuthorIds?: string[]; // IDs for future collaborator references
   researchContributors?: ResearchContributor[]; // Research & investigative contributors
+  researchContributorIds?: string[]; // IDs for future research contributors
   editorialReviewers?: EditorialReviewer[]; // Peer & editorial reviewers
+  reviewerIds?: string[]; // IDs for future editorial reviewers
   doi?: string; // e.g. "10.5281/zenodo.10892341"
   archivalRefId?: string; // e.g. "TOL-2026-PSY-001"
   readTime: string; // Calculated read time e.g. "12 min read"
