@@ -159,9 +159,9 @@ export default function FeaturedResearchGrid({
                   </span>
                   <span 
                     className="font-serif text-xs text-paper/85 font-medium truncate max-w-[100px] sm:max-w-[120px] xl:max-w-[140px]" 
-                    title={article.authorName || (article.authorId === 'sania' ? 'Sania' : 'The Oligarchy')}
+                    title={article.authorName || 'The Oligarchy'}
                   >
-                    {article.authorName || (article.authorId === 'sania' ? 'Sania' : 'The Oligarchy')}
+                    {article.authorName || 'The Oligarchy'}
                   </span>
                 </div>
 

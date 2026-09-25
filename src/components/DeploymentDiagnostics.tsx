@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Article, AuthorProfile } from '../types';
 import { db } from '../firebase';
-import { collection, getDocs, limit, query } from 'firebase/firestore';
+import { collection, getDocs, limit, query, where } from 'firebase/firestore';
 
 interface DeploymentDiagnosticsProps {
   allArticles: Article[];
@@ -65,7 +65,7 @@ export default function DeploymentDiagnostics({
     setPingError(null);
     const start = performance.now();
     try {
-      const q = query(collection(db, 'articles'), limit(1));
+      const q = query(collection(db, 'articles'), where('status', '==', 'published'), limit(1));
       await getDocs(q);
       try {
         const vlSnap = await getDocs(collection(db, 'views_log'));

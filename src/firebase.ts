@@ -58,6 +58,16 @@ INITIAL_SEED_ARTICLES.forEach(art => {
   if (art.slug) fullArticlesCache.set(art.slug, art);
 });
 
+export function resolveArticleAuthorInfo(data: any): { authorId: string; authorName: string } {
+  const rawId = (data.authorId || '').trim();
+  const rawName = (data.authorName || data.author || '').trim();
+  
+  return {
+    authorId: rawId || 'priyasha-priyal-jena',
+    authorName: rawName || 'Priyasha Priyal Jena'
+  };
+}
+
 export interface FetchArticlesOptions {
   status?: 'published' | 'draft' | 'all';
   category?: string;
@@ -70,6 +80,66 @@ export interface FetchArticlesResult {
   articles: Article[];
   lastDoc: DocumentSnapshot | null;
   hasMore: boolean;
+}
+
+/**
+ * Helper to parse a Firestore document snapshot into a typed Article preview
+ */
+export function parseArticlePreviewDoc(docSnap: DocumentSnapshot): Article {
+  const data = (docSnap.data() || {}) as any;
+  const artId = docSnap.id;
+  const authorInfo = resolveArticleAuthorInfo(data);
+
+  const preview: Article = {
+    id: artId,
+    title: data.title || '',
+    subtitle: data.subtitle || '',
+    slug: data.slug || artId,
+    category: data.category || 'criminology',
+    tags: Array.isArray(data.tags) ? data.tags : [],
+    featuredImage: data.featuredImage || '',
+    canvaEmbed: data.canvaEmbed || '',
+    pdfLink: data.pdfLink || '',
+    authorId: authorInfo.authorId,
+    authorName: authorInfo.authorName,
+    authorTitle: data.authorTitle || undefined,
+    authorInstitution: data.authorInstitution || undefined,
+    authorOrcid: data.authorOrcid || undefined,
+    coAuthors: Array.isArray(data.coAuthors) ? data.coAuthors : [],
+    doi: data.doi || undefined,
+    archivalRefId: data.archivalRefId || undefined,
+    createdByUid: data.createdByUid || undefined,
+    createdByEmail: data.createdByEmail || undefined,
+    assignedReviewerUids: Array.isArray(data.assignedReviewerUids) ? data.assignedReviewerUids : [],
+    assignedReviewerEmails: Array.isArray(data.assignedReviewerEmails) ? data.assignedReviewerEmails : [],
+    readTime: data.readTime || '5 min read',
+    excerpt: data.excerpt || '',
+    content: data.content || '',
+    status: data.status || 'published',
+    originalPublishedAt: data.originalPublishedAt || data.publishDate || undefined,
+    publishDate: data.originalPublishedAt || data.publishDate || '',
+    scheduledAt: data.scheduledAt,
+    createdAt: data.createdAt || Date.now(),
+    updatedAt: data.updatedAt || Date.now(),
+    views: typeof data.views === 'number' ? data.views : 0,
+    isFeatured: Boolean(data.isFeatured),
+    isPinned: Boolean(data.isPinned),
+    featuredOrder: data.featuredOrder,
+    seriesName: data.seriesName || '',
+    seriesPart: data.seriesPart,
+    sources: Array.isArray(data.sources) ? data.sources : [],
+    seoTitle: data.seoTitle,
+    seoDescription: data.seoDescription,
+    canonicalUrl: data.canonicalUrl,
+  };
+
+  // If full content is present in the document, update the in-memory cache
+  if (data.content && data.content.length > 50) {
+    fullArticlesCache.set(artId, preview);
+    if (preview.slug) fullArticlesCache.set(preview.slug, preview);
+  }
+
+  return preview;
 }
 
 /**
@@ -86,13 +156,21 @@ export async function fetchArticlePreviews(options: FetchArticlesOptions = {}): 
     lastDoc
   } = options;
 
+  // Zero-trust check: Unauthenticated clients must only query published articles to satisfy security rules.
+  // Managing editor can query 'all' when authenticated.
+  const currentUser = auth.currentUser;
+  const currentEmail = (currentUser?.email || '').toLowerCase().trim();
+  const isPrivilegedEditor = Boolean(currentUser && currentEmail === 'theoligarchy.ppj@gmail.com');
+
+  const effectiveStatus = (!isPrivilegedEditor && status === 'all') ? 'published' : status;
+
   try {
     const articlesCol = collection(db, 'articles');
     const constraints: any[] = [];
 
     // Filter by status if specified and not 'all'
-    if (status !== 'all') {
-      constraints.push(where('status', '==', status));
+    if (effectiveStatus !== 'all') {
+      constraints.push(where('status', '==', effectiveStatus));
     }
 
     // Optional category filtering in query
@@ -119,72 +197,43 @@ export async function fetchArticlePreviews(options: FetchArticlesOptions = {}): 
     try {
       snapshot = await getDocs(q);
     } catch (queryErr: any) {
-      // Fallback query if composite index is building or missing
+      // Fallback query if composite index is building or missing:
+      // Preserve the security-critical status filter so security rules pass without permission denied!
       console.warn("Compound indexed query encountered fallback:", queryErr?.message || queryErr);
-      const fallbackQuery = query(articlesCol, limit(limitCount || 30));
+      const fallbackConstraints: any[] = [];
+      if (effectiveStatus !== 'all') {
+        fallbackConstraints.push(where('status', '==', effectiveStatus));
+      }
+      if (category && category !== 'all') {
+        fallbackConstraints.push(where('category', '==', category));
+      }
+      fallbackConstraints.push(limit(limitCount || 30));
+      const fallbackQuery = query(articlesCol, ...fallbackConstraints);
       snapshot = await getDocs(fallbackQuery);
     }
 
     if (snapshot.empty && !lastDoc) {
-      // If empty on first load, seed initial data
+      // If empty on first load, seed initial data safely
       await seedInitialDataIfEmpty();
-      snapshot = await getDocs(query(articlesCol, limit(limitCount || 30)));
+      const retryConstraints: any[] = [];
+      if (effectiveStatus !== 'all') {
+        retryConstraints.push(where('status', '==', effectiveStatus));
+      }
+      retryConstraints.push(limit(limitCount || 30));
+      snapshot = await getDocs(query(articlesCol, ...retryConstraints));
     }
 
-    const fetchedArticles: Article[] = snapshot.docs.map(docSnap => {
-      const data = docSnap.data() as any;
-      const artId = docSnap.id;
+    const fetchedArticles: Article[] = snapshot.docs.map(parseArticlePreviewDoc);
 
-      // Extract lightweight preview fields
-      const preview: Article = {
-        id: artId,
-        title: data.title || '',
-        subtitle: data.subtitle || '',
-        slug: data.slug || artId,
-        category: data.category || 'criminology',
-        tags: Array.isArray(data.tags) ? data.tags : [],
-        featuredImage: data.featuredImage || '',
-        canvaEmbed: data.canvaEmbed || '',
-        pdfLink: data.pdfLink || '',
-        authorId: data.authorId || 'priyasha-priyal-jena',
-        authorName: data.authorName || (data.authorId === 'sania' ? 'Sania' : 'Priyasha Priyal Jena'),
-        authorTitle: data.authorTitle || undefined,
-        authorInstitution: data.authorInstitution || undefined,
-        authorOrcid: data.authorOrcid || undefined,
-        coAuthors: Array.isArray(data.coAuthors) ? data.coAuthors : [],
-        doi: data.doi || undefined,
-        archivalRefId: data.archivalRefId || undefined,
-        createdByUid: data.createdByUid || undefined,
-        createdByEmail: data.createdByEmail || undefined,
-        assignedReviewerUids: Array.isArray(data.assignedReviewerUids) ? data.assignedReviewerUids : [],
-        assignedReviewerEmails: Array.isArray(data.assignedReviewerEmails) ? data.assignedReviewerEmails : [],
-        readTime: data.readTime || '5 min read',
-        excerpt: data.excerpt || '',
-        content: data.content || '', // will be populated from cache or full fetch if needed
-        status: data.status || 'published',
-        originalPublishedAt: data.originalPublishedAt || data.publishDate || undefined,
-        publishDate: data.originalPublishedAt || data.publishDate || '',
-        scheduledAt: data.scheduledAt,
-        createdAt: data.createdAt || Date.now(),
-        updatedAt: data.updatedAt || Date.now(),
-        views: typeof data.views === 'number' ? data.views : 0,
-        isFeatured: Boolean(data.isFeatured),
-        isPinned: Boolean(data.isPinned),
-        seriesName: data.seriesName || '',
-        seriesPart: data.seriesPart,
-        sources: Array.isArray(data.sources) ? data.sources : [],
-        seoTitle: data.seoTitle,
-        seoDescription: data.seoDescription,
-        canonicalUrl: data.canonicalUrl,
-      };
-
-      // If full content is present in the document, update the in-memory cache
-      if (data.content && data.content.length > 50) {
-        fullArticlesCache.set(artId, preview);
-        if (preview.slug) fullArticlesCache.set(preview.slug, preview);
+    // Ensure robust in-memory sorting
+    fetchedArticles.sort((a, b) => {
+      if (sortBy === 'views') return (b.views || 0) - (a.views || 0);
+      if (sortBy === 'publishDate') {
+        const dateA = new Date(a.publishDate || a.createdAt).getTime();
+        const dateB = new Date(b.publishDate || b.createdAt).getTime();
+        return (isNaN(dateB) ? 0 : dateB) - (isNaN(dateA) ? 0 : dateA);
       }
-
-      return preview;
+      return (b.createdAt || 0) - (a.createdAt || 0);
     });
 
     const newLastDoc = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
@@ -196,7 +245,7 @@ export async function fetchArticlePreviews(options: FetchArticlesOptions = {}): 
       hasMore
     };
   } catch (error) {
-    console.warn("Network unavailable, resolving article previews from local cache fallback:", error);
+    console.warn("Resolving article previews from local cache fallback:", error);
     const cachedFallback = getCachedArticles();
     return {
       articles: cachedFallback.length > 0 ? cachedFallback : INITIAL_SEED_ARTICLES,
@@ -204,6 +253,86 @@ export async function fetchArticlePreviews(options: FetchArticlesOptions = {}): 
       hasMore: false
     };
   }
+}
+
+/**
+ * Fetch drafts owned by a specific authenticated author
+ */
+export async function fetchAuthorDraftArticles(userInfo: { uid?: string; email?: string; authorId?: string }): Promise<Article[]> {
+  if (!userInfo.uid && !userInfo.email && !userInfo.authorId) return [];
+
+  const articlesCol = collection(db, 'articles');
+  const results: Article[] = [];
+  const seenIds = new Set<string>();
+
+  // 1. By authorId
+  if (userInfo.authorId) {
+    try {
+      const q = query(articlesCol, where('authorId', '==', userInfo.authorId), where('status', '==', 'draft'));
+      const snap = await getDocs(q);
+      snap.docs.forEach(d => {
+        if (!seenIds.has(d.id)) {
+          seenIds.add(d.id);
+          results.push(parseArticlePreviewDoc(d));
+        }
+      });
+    } catch {
+      try {
+        const qFallback = query(articlesCol, where('authorId', '==', userInfo.authorId));
+        const snap = await getDocs(qFallback);
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (data.status === 'draft' && !seenIds.has(d.id)) {
+            seenIds.add(d.id);
+            results.push(parseArticlePreviewDoc(d));
+          }
+        });
+      } catch {}
+    }
+  }
+
+  // 2. By createdByEmail
+  if (userInfo.email) {
+    const email = userInfo.email.toLowerCase().trim();
+    try {
+      const qEmail = query(articlesCol, where('createdByEmail', '==', email), where('status', '==', 'draft'));
+      const snap = await getDocs(qEmail);
+      snap.docs.forEach(d => {
+        if (!seenIds.has(d.id)) {
+          seenIds.add(d.id);
+          results.push(parseArticlePreviewDoc(d));
+        }
+      });
+    } catch {
+      try {
+        const qFallback = query(articlesCol, where('createdByEmail', '==', email));
+        const snap = await getDocs(qFallback);
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (data.status === 'draft' && !seenIds.has(d.id)) {
+            seenIds.add(d.id);
+            results.push(parseArticlePreviewDoc(d));
+          }
+        });
+      } catch {}
+    }
+  }
+
+  // 3. By createdByUid
+  if (userInfo.uid) {
+    try {
+      const qUid = query(articlesCol, where('createdByUid', '==', userInfo.uid), where('status', '==', 'draft'));
+      const snap = await getDocs(qUid);
+      snap.docs.forEach(d => {
+        if (!seenIds.has(d.id)) {
+          seenIds.add(d.id);
+          results.push(parseArticlePreviewDoc(d));
+        }
+      });
+    } catch {}
+  }
+
+  return results;
 }
 
 /**
@@ -230,6 +359,7 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
 
     if (artSnap.exists()) {
       const data = artSnap.data() as any;
+      const authorInfo = resolveArticleAuthorInfo(data);
       const fullArticle: Article = {
         id: artSnap.id,
         title: data.title || '',
@@ -240,8 +370,8 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
         featuredImage: data.featuredImage || '',
         canvaEmbed: data.canvaEmbed || '',
         pdfLink: data.pdfLink || '',
-        authorId: data.authorId || 'priyasha-priyal-jena',
-        authorName: data.authorName || (data.authorId === 'sania' ? 'Sania' : 'Priyasha Priyal Jena'),
+        authorId: authorInfo.authorId,
+        authorName: authorInfo.authorName,
         authorTitle: data.authorTitle || undefined,
         authorInstitution: data.authorInstitution || undefined,
         authorOrcid: data.authorOrcid || undefined,
@@ -284,6 +414,7 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
     if (!slugSnap.empty) {
       const docSnap = slugSnap.docs[0];
       const data = docSnap.data() as any;
+      const authorInfo = resolveArticleAuthorInfo(data);
       const fullArticle: Article = {
         id: docSnap.id,
         title: data.title || '',
@@ -294,8 +425,8 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
         featuredImage: data.featuredImage || '',
         canvaEmbed: data.canvaEmbed || '',
         pdfLink: data.pdfLink || '',
-        authorId: data.authorId || 'priyasha-priyal-jena',
-        authorName: data.authorName || (data.authorId === 'sania' ? 'Sania' : 'Priyasha Priyal Jena'),
+        authorId: authorInfo.authorId,
+        authorName: authorInfo.authorName,
         authorTitle: data.authorTitle || undefined,
         authorInstitution: data.authorInstitution || undefined,
         authorOrcid: data.authorOrcid || undefined,
@@ -362,9 +493,9 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
 export async function seedInitialDataIfEmpty() {
   try {
     const articlesCol = collection(db, 'articles');
-    const articlesSnapshot = await getDocs(articlesCol);
+    const articlesSnapshot = await getDocs(query(articlesCol, where('status', '==', 'published'), limit(1)));
     
-    if (articlesSnapshot.empty) {
+    if (articlesSnapshot.empty && auth.currentUser) {
       console.log('Database empty. Seeding initial academic-journal articles...');
       for (const article of INITIAL_SEED_ARTICLES) {
         await setDoc(doc(db, 'articles', article.id), article);

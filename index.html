@@ -20,18 +20,20 @@
         window.addEventListener('unhandledrejection', function(event) {
           var reason = event.reason;
           var reasonStr = typeof reason === 'string' ? reason : (reason && reason.message ? reason.message : String(reason || ''));
-          if (reasonStr.includes('WebSocket') || reasonStr.includes('websocket')) {
+          if (reasonStr.includes('WebSocket') || reasonStr.includes('websocket') || reasonStr.includes('closed without opened')) {
             event.preventDefault();
             event.stopPropagation();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
           }
         }, true);
 
         // 3. Suppress window error events for benign WebSocket closure
         window.addEventListener('error', function(event) {
           var msg = typeof event === 'string' ? event : (event.message || '');
-          if (msg.includes('WebSocket') || msg.includes('websocket') || msg.includes('failed to connect to websocket')) {
+          if (msg.includes('WebSocket') || msg.includes('websocket') || msg.includes('failed to connect to websocket') || msg.includes('closed without opened')) {
             event.preventDefault();
             event.stopPropagation();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
           }
         }, true);
       })();

@@ -60,6 +60,16 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
     // Auto-login only if active session belongs to the designated owner or an active registered staff member
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        // Explicitly block and deactivate removed accounts
+        if (user.email && user.email.toLowerCase() === 'saniasvb26@gmail.com') {
+          signOut(auth).catch(console.error);
+          localStorage.removeItem('tol_editorial_session');
+          localStorage.removeItem('tol_simulated_role');
+          setMessageType('error');
+          setMessage('Access Denied: The account for saniasvb26@gmail.com has been removed.');
+          return;
+        }
+
         // 1. If it's the designated root owner
         if (user.email && user.email.toLowerCase() === DESIGNATED_OWNER_EMAIL.toLowerCase()) {
           const ownerMember: EditorialUser = {
@@ -113,6 +123,12 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
     if (!password.trim()) {
       setMessageType('error');
       setMessage('Please enter your individual password.');
+      return;
+    }
+
+    if (inputEmail === 'saniasvb26@gmail.com') {
+      setMessageType('error');
+      setMessage('Access Denied: The account for "saniasvb26@gmail.com" has been removed by the Owner.');
       return;
     }
 

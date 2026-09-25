@@ -117,7 +117,7 @@ export default function FeaturedResearch({
         {/* Banner footer views, author and timing */}
         <div className="flex flex-wrap gap-x-6 gap-y-2 items-center border-t border-paper/10 pt-4 mt-2 font-sans text-[10px] text-paper/40">
           <span className="font-semibold text-paper/80 uppercase tracking-wider">
-            <span className="text-blood font-bold tracking-widest">AUTHOR:</span> {article.authorName || (article.authorId === 'sania' ? 'Sania' : 'The Oligarchy')}
+            <span className="text-blood font-bold tracking-widest">AUTHOR:</span> {article.authorName || 'The Oligarchy'}
           </span>
           <span>Published: {article.originalPublishedAt || article.publishDate || (article.createdAt ? new Date(article.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'No data available')}</span>
           <span className="flex items-center gap-1"><Eye size={12} /> {article.views || 0} views</span>

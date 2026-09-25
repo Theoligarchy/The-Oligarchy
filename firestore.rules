@@ -29,15 +29,13 @@ service cloud.firestore {
     function isEditorialMember() {
       return isDesignatedOwner() ||
              (isSignedIn() && (
-               (exists(/databases/$(database)/documents/editorial_team/$(request.auth.uid)) &&
-                getEditorialUser(request.auth.uid).status != 'suspended') ||
-               (request.auth.token.email != null && request.auth.token.email.lower() == 'saniasvb26@gmail.com')
+               exists(/databases/$(database)/documents/editorial_team/$(request.auth.uid)) &&
+               getEditorialUser(request.auth.uid).status != 'suspended'
              ));
     }
 
     function getEditorialRole() {
       return isDesignatedOwner() ? 'admin' :
-             (request.auth.token.email != null && request.auth.token.email.lower() == 'saniasvb26@gmail.com') ? 'author' :
              (isEditorialMember() ? getEditorialUser(request.auth.uid).role : 'none');
     }
 
@@ -56,8 +54,7 @@ service cloud.firestore {
     function isArticleAuthor(artData) {
       return isSignedIn() && (
         artData.createdByUid == request.auth.uid ||
-        (request.auth.token.email != null && artData.createdByEmail != null && artData.createdByEmail.lower() == request.auth.token.email.lower()) ||
-        (request.auth.token.email != null && request.auth.token.email.lower() == 'saniasvb26@gmail.com' && artData.authorId == 'sania')
+        (request.auth.token.email != null && artData.createdByEmail != null && artData.createdByEmail.lower() == request.auth.token.email.lower())
       );
     }
 
@@ -128,12 +125,7 @@ service cloud.firestore {
                        (isRegisteredAuthor() &&
                         incoming().status in ['draft', 'published'] &&
                         (incoming().createdByUid == request.auth.uid ||
-                         (request.auth.token.email != null && incoming().createdByEmail != null && incoming().createdByEmail.lower() == request.auth.token.email.lower())) &&
-                        (
-                          request.auth.token.email != null && request.auth.token.email.lower() == 'saniasvb26@gmail.com'
-                            ? incoming().authorId == 'sania'
-                            : true
-                        ));
+                         (request.auth.token.email != null && incoming().createdByEmail != null && incoming().createdByEmail.lower() == request.auth.token.email.lower())));
 
       // Managing editor can delete any article; authors can delete their own DRAFTS
       allow delete: if isManagingEditor() ||

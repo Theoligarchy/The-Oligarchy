@@ -17,18 +17,6 @@ export const INITIAL_EDITORIAL_TEAM: EditorialUser[] = [
     bio: 'Founder and Editor of The Oligarchy, an independent research publication exploring crime, psychology, politics, and systems of power. Founded at 19, the project began as an attempt to understand why people, institutions, and societies behave the way they do.',
     assignedCategories: ['criminology', 'psyche', 'politics'],
     status: 'active'
-  },
-  {
-    uid: 'keluk1GwazV5dZqNNYCOQPr9JnP2',
-    email: 'saniasvb26@gmail.com',
-    displayName: 'Sania',
-    role: 'author',
-    authorId: 'sania',
-    institution: 'The Oligarchy Contributing Researcher',
-    credentials: 'Author & Contributing Researcher',
-    bio: 'Contributing researcher and scholar exploring investigative criminology, institutional dynamics, and political analysis.',
-    assignedCategories: ['criminology', 'psyche', 'politics'],
-    status: 'active'
   }
 ];
 
@@ -455,6 +443,17 @@ export async function resolveEditorialUser(authUser: { email?: string | null; ui
       bio: 'Founder and Editor of The Oligarchy, an independent research publication exploring crime, psychology, politics, and systems of power.',
       assignedCategories: ['criminology', 'psyche', 'politics'],
       status: 'active'
+    };
+  }
+
+  // Deactivated/Revoked account check
+  if (email === 'saniasvb26@gmail.com') {
+    return {
+      uid,
+      email,
+      displayName: 'Deactivated Account',
+      role: 'author',
+      status: 'revoked'
     };
   }
 

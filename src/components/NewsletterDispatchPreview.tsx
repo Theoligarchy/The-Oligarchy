@@ -301,7 +301,7 @@ export default function NewsletterDispatchPreview({
                 <tr>
                   <td>
                     <span style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; color: ${themeStyles.subtext};">
-                      Author: <strong style="color: ${themeStyles.text};">${(selectedArticle as any).authorName || selectedArticle.author || (selectedArticle.authorId === 'sania' ? 'Sania' : 'The Oligarchy')}</strong>
+                      Author: <strong style="color: ${themeStyles.text};">${(selectedArticle as any).authorName || selectedArticle.author || 'The Oligarchy'}</strong>
                     </span>
                   </td>
                 </tr>
@@ -395,7 +395,7 @@ Peer-Reviewed Research Platform · https://theoligarchy.in
 
 NEW DISPATCH: ${selectedArticle.title.toUpperCase()}
 Category: ${selectedArticle.category || 'Criminology'}
-Author: ${(selectedArticle as any).authorName || selectedArticle.author || (selectedArticle.authorId === 'sania' ? 'Sania' : 'The Oligarchy')}
+Author: ${(selectedArticle as any).authorName || selectedArticle.author || 'The Oligarchy'}
 Read Time: ${selectedArticle.readTime || '10 min read'}
 
 ${selectedArticle.subtitle ? `Subtitle: ${selectedArticle.subtitle}\n` : ''}
@@ -407,7 +407,7 @@ READ THE COMPLETE EMPIRICAL INVESTIGATION:
 ${articleUrl}
 
 --- ACADEMIC CITATION ---
-${(selectedArticle as any).authorName || selectedArticle.author || (selectedArticle.authorId === 'sania' ? 'Sania' : 'The Oligarchy')} (${new Date().getFullYear()}). ${selectedArticle.title}. The Oligarchy.
+${(selectedArticle as any).authorName || selectedArticle.author || 'The Oligarchy'} (${new Date().getFullYear()}). ${selectedArticle.title}. The Oligarchy.
 URL: ${articleUrl}
 
 ---

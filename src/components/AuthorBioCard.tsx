@@ -60,7 +60,7 @@ export default function AuthorBioCard({
 
   // Current active author summary info
   const activeAuthor = authorsList[activeAuthorIndex] || authorsList[0] || {
-    name: currentArticle.authorName || (currentArticle.authorId === 'sania' ? 'Sania' : 'Staff Researcher'),
+    name: currentArticle.authorName || 'Staff Researcher',
     role: currentArticle.authorTitle || (currentArticle.authorId === 'priyasha-priyal-jena' ? 'Founder & Editor-in-Chief' : undefined),
     institution: currentArticle.authorInstitution,
     orcid: currentArticle.authorOrcid
@@ -152,7 +152,7 @@ export default function AuthorBioCard({
       }
 
       // If founder, also match default/unassigned founder treatises
-      if (isFounder && (!artAuthorName || artAuthorName.includes('priyasha'))) {
+      if (isFounder && (!artAuthorName || artAuthorName.includes('priyasha')) && artAuthorId !== 'contributor') {
         return true;
       }
 

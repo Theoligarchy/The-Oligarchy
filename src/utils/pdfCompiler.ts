@@ -38,8 +38,7 @@ export const compileScholarlyPDF = (article: Article) => {
     authorDisplayName = matchedContributor.name;
   }
   if (!authorDisplayName) {
-    if (rawAuthorId === 'sania') authorDisplayName = 'Sania';
-    else if (rawAuthorId === 'priyasha-priyal-jena') authorDisplayName = 'Priyasha Priyal Jena';
+    if (rawAuthorId === 'priyasha-priyal-jena') authorDisplayName = 'Priyasha Priyal Jena';
     else authorDisplayName = 'Staff Researcher';
   }
 

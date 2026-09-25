@@ -317,8 +317,8 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
     }
 
     return {
-      id: userAuthorId || (userEmail ? userEmail.split('@')[0].replace(/[^a-z0-9]/g, '-') : 'sania'),
-      name: userDisplayName || (userEmail ? userEmail.split('@')[0] : 'Sania'),
+      id: userAuthorId || (userEmail ? userEmail.split('@')[0].replace(/[^a-z0-9]/g, '-') : 'contributor'),
+      name: userDisplayName || (userEmail ? userEmail.split('@')[0] : 'Contributor'),
       orcid: currentUser?.orcid || ''
     };
   }, [isOwnerUser, currentUser, contributors]);
@@ -1165,7 +1165,9 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
       createdByUid: existingArt?.createdByUid || currentUser?.uid || auth.currentUser?.uid,
       createdByEmail: existingArt?.createdByEmail || currentUser?.email || auth.currentUser?.email || undefined,
       doi: sanitized.doi,
-      coAuthors: sanitized.coAuthors,
+      coAuthors: sanitized.coAuthors || existingArt?.coAuthors || [],
+      researchContributors: existingArt?.researchContributors || [],
+      editorialReviewers: existingArt?.editorialReviewers || [],
       readTime: computedReadTime,
       excerpt: sanitized.excerpt || (sanitized.title || title.trim()),
       content: sanitized.content || content,

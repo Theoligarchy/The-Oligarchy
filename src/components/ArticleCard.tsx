@@ -86,7 +86,7 @@ export default function ArticleCard({ article, onClick, isSaved = false, onToggl
         <div className="font-sans text-[10px] uppercase tracking-wider text-paper/40 flex items-center gap-1.5 -mt-1 mb-1">
           <span className="text-blood font-bold tracking-widest text-[9px]">AUTHOR:</span>
           <span className="text-paper/85 font-semibold">
-            {article.authorName || (article.authorId === 'sania' ? 'Sania' : 'The Oligarchy')}
+            {article.authorName || 'The Oligarchy'}
           </span>
         </div>
 

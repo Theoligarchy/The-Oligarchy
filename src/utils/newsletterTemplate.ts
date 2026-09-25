@@ -73,7 +73,7 @@ export function generateVintageNewspaperEmail(options: NewsletterRenderOptions):
 
   const cleanCategory = (article.category || 'CRIMINOLOGY').toUpperCase();
   const publishedDate = article.originalPublishedAt || article.publishDate || new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-  const authorDisplay = article.authorName || (article.authorId === 'sania' ? 'Sania' : 'The Oligarchy');
+  const authorDisplay = article.authorName || 'The Oligarchy';
   const authorAffil = article.authorInstitution ? ` · ${article.authorInstitution}` : (article.authorTitle ? ` · ${article.authorTitle}` : '');
   const readTimeDisplay = article.readTime || '6 min read';
   const archivalRef = article.archivalRefId || `TOL-${cleanCategory.slice(0, 3)}-${article.id.slice(-4).toUpperCase()}`;

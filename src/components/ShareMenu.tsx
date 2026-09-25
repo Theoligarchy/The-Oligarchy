@@ -51,7 +51,7 @@ export default function ShareMenu({ article }: ShareMenuProps) {
   const shareText = `Read this independent research analysis on ${article.title} at The Oligarchy:`;
 
   // Custom formatted Instagram caption with dynamic author
-  const authorNameForCaption = (article.authorName || '').trim() || (article.authorId === 'sania' ? 'Sania' : 'The Oligarchy');
+  const authorNameForCaption = (article.authorName || '').trim() || 'The Oligarchy';
   const instagramCaption = `📖 Studying "The Oligarchy" research analysis: "${article.title}" by ${authorNameForCaption}. Explore the systems of power at: ${shareUrl} @theoligarchy.in #TheOligarchy #CriticalInquiry`;
 
   // Close menu on click outside

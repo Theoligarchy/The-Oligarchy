@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Fuse from 'fuse.js';
-import { db, auth, seedInitialDataIfEmpty, fetchArticlePreviews, fetchFullArticle } from './firebase';
+import { db, auth, seedInitialDataIfEmpty, fetchArticlePreviews, fetchFullArticle, fetchAuthorDraftArticles } from './firebase';
 import { INITIAL_SEED_ARTICLES, INITIAL_SEED_READING } from './data/initialSeed';
 import { 
   collection, 
@@ -74,7 +74,8 @@ import {
   Award,
   MessageSquare,
   Link,
-  AlertCircle
+  AlertCircle,
+  Lock
 } from 'lucide-react';
 
 import MarginaliaPanel from './components/MarginaliaPanel';
@@ -330,9 +331,18 @@ export default function App() {
       const readingCol = collection(db, 'reading');
       const contributorsCol = collection(db, 'contributors');
 
+      const currentUser = auth.currentUser;
+      const currentEmail = (currentUser?.email || '').toLowerCase().trim();
+      const isOwnerOrEditor = currentEmail === AUTHORIZED_ADMIN_EMAIL.toLowerCase();
+
+      // Zero-trust query constraint:
+      // Unauthenticated public visitors and non-admins strictly query 'published' status to comply with Firestore rules.
+      // The root managing editor (theoligarchy.ppj@gmail.com) may query 'all' articles (including all drafts).
+      const statusToFetch: 'published' | 'all' = isOwnerOrEditor ? 'all' : 'published';
+
       // Fetch lightweight preview feed and auxiliary collections with graceful fallback handling
       const [previewsResult, readingSnapshot, contributorsSnapshot] = await Promise.all([
-        fetchArticlePreviews({ status: 'all', sortBy: 'createdAt', limitCount: 60 }),
+        fetchArticlePreviews({ status: statusToFetch, sortBy: 'createdAt', limitCount: 60 }),
         getDocs(readingCol).catch((err) => {
           console.warn("Could not fetch reading items, using seed:", err);
           return { docs: [] };
@@ -343,7 +353,25 @@ export default function App() {
         })
       ]);
 
-      const articlesList = previewsResult.articles;
+      let articlesList = previewsResult.articles;
+
+      // If an authenticated scholar is logged in, fetch their personal working drafts securely
+      if (currentUser && !isOwnerOrEditor && activeEditorialUser?.authorId) {
+        try {
+          const authorDrafts = await fetchAuthorDraftArticles({
+            uid: currentUser.uid,
+            email: currentUser.email || undefined,
+            authorId: activeEditorialUser.authorId
+          });
+          if (authorDrafts.length > 0) {
+            const existingIds = new Set(articlesList.map(a => a.id));
+            const newDrafts = authorDrafts.filter(d => !existingIds.has(d.id));
+            articlesList = [...articlesList, ...newDrafts];
+          }
+        } catch (e) {
+          console.warn("Could not fetch author drafts:", e);
+        }
+      }
 
       // Sort: pinned first, then newest
       const sortedArticles = articlesList.sort((a, b) => {
@@ -527,6 +555,7 @@ export default function App() {
             authorId: 'priyasha-priyal-jena',
             status: 'active'
           });
+          loadData();
         } else {
           // Verify if user belongs to the authorized editorial team registry (e.g. author, reviewer, admin)
           try {
@@ -536,6 +565,7 @@ export default function App() {
               setAdminUser(user);
               setActiveEditorialUser(member);
               localStorage.setItem('tol_editorial_session', JSON.stringify(member));
+              loadData();
             } else {
               console.warn(`Unauthorized login attempt detected for ${user.email}. Revoking session.`);
               auth.signOut().catch(console.error);
@@ -1720,6 +1750,7 @@ export default function App() {
                   localStorage.removeItem('tol_simulated_role');
                   setAdminUser(null);
                   setActiveEditorialUser(null);
+                  loadData();
                 };
 
                 // 1. Root Owner / Founder Account: Receives full existing Admin Dashboard with ALL features
@@ -1742,15 +1773,25 @@ export default function App() {
                   );
                 }
 
-                // 2. Author / Managing Editor / Peer Reviewer: Receives AdminDashboard with role-gated tabs and permission controls
+                // 2. Non-Owner Account: Deny access to Admin Dashboard and enforce Owner-only workflow
                 return (
-                  <AdminDashboard 
-                    onLogout={handleLogout} 
-                    allArticles={articles}
-                    refreshArticles={loadData}
-                    editorialUser={activeEditorialUser}
-                    isOwner={false}
-                  />
+                  <div className="py-16 text-center max-w-md mx-auto px-4">
+                    <div className="bg-navy border border-blood/40 p-8 rounded-sm shadow-xl flex flex-col items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-blood/10 border border-blood/30 flex items-center justify-center text-blood">
+                        <Lock size={20} />
+                      </div>
+                      <h3 className="font-serif text-xl font-bold text-paper">Owner Console Restricted</h3>
+                      <p className="font-serif text-xs text-paper/60 leading-relaxed">
+                        This administrative portal is exclusively restricted to the Founder &amp; Owner of The Oligarchy ({AUTHORIZED_ADMIN_EMAIL}).
+                      </p>
+                      <button
+                        onClick={handleLogout}
+                        className="bg-blood hover:bg-blood-light text-paper font-sans text-xs font-bold tracking-widest uppercase px-6 py-2.5 rounded-sm transition-colors mt-2 cursor-pointer"
+                      >
+                        Sign Out
+                      </button>
+                    </div>
+                  </div>
                 );
               })()
             ) : (

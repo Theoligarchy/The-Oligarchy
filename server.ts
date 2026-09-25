@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -210,6 +211,7 @@ function replaceMetaTag(html: string, propertyOrName: string, isProperty: boolea
 
 async function startServer() {
   const app = express();
+  const httpServer = http.createServer(app);
   const PORT = 3000;
   const isProd = process.env.NODE_ENV === 'production';
 
@@ -628,7 +630,7 @@ ${combinedText.slice(0, 10000)}
       const excerpt = fields.excerpt?.stringValue || fields.description?.stringValue || '';
       const content = fields.content?.stringValue || '';
       const featuredImage = fields.featuredImage?.stringValue || '';
-      const authorName = fields.authorName?.stringValue || (fields.authorId?.stringValue === 'sania' ? 'Sania' : 'Priyasha Priyal Jena');
+      const authorName = fields.authorName?.stringValue || 'Priyasha Priyal Jena';
       const originalPublishedAt = fields.originalPublishedAt?.stringValue || fields.publishDate?.stringValue || '';
       const readTime = fields.readTime?.stringValue || '6 min read';
       const doi = fields.doi?.stringValue || '';
@@ -998,7 +1000,7 @@ ${combinedText.slice(0, 10000)}
                 content: parseFirestoreValue(fields.content) || '',
                 featuredImage: parseFirestoreValue(fields.featuredImage) || '',
                 date: parseFirestoreValue(fields.originalPublishedAt) || parseFirestoreValue(fields.publishDate) || parseFirestoreValue(fields.date) || parseFirestoreValue(fields.publishedAt) || '',
-                author: parseFirestoreValue(fields.authorName) || parseFirestoreValue(fields.author) || (parseFirestoreValue(fields.authorId) === 'sania' ? 'Sania' : 'The Oligarchy'),
+                author: parseFirestoreValue(fields.authorName) || parseFirestoreValue(fields.author) || 'The Oligarchy',
                 category: parseFirestoreValue(fields.category) || 'Criminology',
                 updateTime: doc.updateTime || new Date().toISOString()
               });
@@ -1072,7 +1074,10 @@ ${combinedText.slice(0, 10000)}
   let vite: any;
   if (!isProd) {
     vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { 
+        middlewareMode: true,
+        hmr: { server: httpServer }
+      },
       appType: 'custom',
     });
     app.use(vite.middlewares);
@@ -1153,9 +1158,27 @@ ${combinedText.slice(0, 10000)}
         }
       }
 
-      // 4. Transform HTML in development for Vite's HMR scripts
+      // 4. Transform HTML in development for Vite's scripts
       if (!isProd && vite) {
         html = await vite.transformIndexHtml(url, html);
+        const wsSuppressionScript = `<script>
+(function() {
+  var origConsoleError = console.error;
+  console.error = function() {
+    var msg = String(arguments[0] || '');
+    if (msg.includes('failed to connect to websocket') || msg.includes('WebSocket closed without opened')) return;
+    origConsoleError.apply(console, arguments);
+  };
+  window.addEventListener('unhandledrejection', function(event) {
+    var r = String(event.reason?.message || event.reason || '');
+    if (r.includes('WebSocket') || r.includes('websocket')) {
+      event.preventDefault();
+      if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+    }
+  }, true);
+})();
+</script>`;
+        html = html.replace('<head>', '<head>' + wsSuppressionScript);
       }
 
       res.status(200).set({ 'Content-Type': 'text/html' }).send(html);
@@ -1167,7 +1190,7 @@ ${combinedText.slice(0, 10000)}
     }
   });
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`[Full-Stack Server] Server running on http://localhost:${PORT}`);
   });
 }

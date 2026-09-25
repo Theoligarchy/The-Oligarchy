@@ -16,6 +16,21 @@ export interface CoAuthor {
   profileUrl?: string;
 }
 
+export interface ResearchContributor {
+  name: string;
+  role?: string; // e.g. "Data Specialist", "Archive Researcher", "Field Investigator", "Legal Analyst"
+  institution?: string;
+  orcid?: string;
+  email?: string;
+}
+
+export interface EditorialReviewer {
+  name: string;
+  role?: string; // e.g. "Peer Reviewer", "Methodology Reviewer", "Statistical Auditor"
+  institution?: string;
+  orcid?: string;
+}
+
 export interface ArticleVersion {
   id: string;
   timestamp: number;
@@ -41,6 +56,8 @@ export interface Article {
   authorInstitution?: string;
   authorOrcid?: string; // e.g. "0000-0000-0000-0000"
   coAuthors?: CoAuthor[]; // Multi-author attribution for investigative series
+  researchContributors?: ResearchContributor[]; // Research & investigative contributors
+  editorialReviewers?: EditorialReviewer[]; // Peer & editorial reviewers
   doi?: string; // e.g. "10.5281/zenodo.10892341"
   archivalRefId?: string; // e.g. "TOL-2026-PSY-001"
   readTime: string; // Calculated read time e.g. "12 min read"
