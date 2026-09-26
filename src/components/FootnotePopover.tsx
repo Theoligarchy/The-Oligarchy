@@ -154,7 +154,7 @@ export default function FootnotePopover({
   return (
     <AnimatePresence>
       <div 
-        className="fixed inset-0 pointer-events-none z-50 select-text"
+        className="fixed inset-0 pointer-events-none z-50 select-text no-print"
         id="footnote-popover-portal"
       >
         <motion.div

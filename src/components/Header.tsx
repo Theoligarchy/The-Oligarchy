@@ -39,7 +39,7 @@ export default function Header({ activeTab, setActiveTab, onSearch, savedCount =
   const isAnnouncementActive = siteSettings?.announcementActive && siteSettings?.announcementText;
 
   return (
-    <header className="bg-ink border-b-3 border-double border-paper/20 select-none">
+    <header className="bg-ink border-b-3 border-double border-paper/20 select-none no-print">
       {/* Dynamic Announcement Banner Marquee if enabled */}
       {isAnnouncementActive && (
         <div className="bg-blood/95 border-b border-blood text-paper py-2 px-4 text-center font-serif text-xs flex items-center justify-center gap-2 shadow-inner">

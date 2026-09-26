@@ -91,13 +91,18 @@ export default function SourcesSection({ sources }: SourcesSectionProps) {
                           {src.title}
                         </span>
                         {src.citation && (
-                          <span className="font-sans text-[9px] tracking-wider uppercase ml-2 text-paper/50 bg-paper/5 border border-paper/10 px-2 py-0.5 rounded-sm inline-block">
+                          <span className="font-sans text-[9px] tracking-wider uppercase ml-2 text-paper/50 bg-paper/5 border border-paper/10 px-2 py-0.5 rounded-sm inline-block print:border-none print:bg-transparent print:text-black print:text-[8pt] print:ml-1">
                             {src.citation}
+                          </span>
+                        )}
+                        {src.url && (
+                          <span className="hidden print:inline font-mono text-[7.5pt] text-neutral-600 ml-1.5 break-all">
+                            [{src.url}]
                           </span>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-3 shrink-0 mt-1 sm:mt-0 self-end sm:self-start">
+                      <div className="flex items-center gap-3 shrink-0 mt-1 sm:mt-0 self-end sm:self-start no-print">
                         {/* Copy citation button */}
                         <button
                           type="button"

@@ -44,7 +44,7 @@ export default function Footer({ setActiveTab, setCategoryFilter, siteSettings, 
   };
 
   return (
-    <footer className="bg-ink border-t-2 border-blood pt-16 pb-8 px-6 md:px-12 select-none">
+    <footer className="bg-ink border-t-2 border-blood pt-16 pb-8 px-6 md:px-12 select-none no-print">
       <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
         
         {/* Brand & Social Column */}

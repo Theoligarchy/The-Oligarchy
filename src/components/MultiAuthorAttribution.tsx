@@ -102,7 +102,7 @@ export default function MultiAuthorAttribution({
           </div>
 
           {/* Quick link to contributor registry */}
-          <div className="shrink-0">
+          <div className="shrink-0 no-print">
             <button
               onClick={() => handleAuthorClick(article.authorName, article.authorId)}
               className="font-sans text-[9px] font-bold tracking-widest uppercase text-blood hover:text-blood-light flex items-center gap-1 cursor-pointer transition-colors"

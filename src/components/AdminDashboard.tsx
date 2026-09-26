@@ -33,6 +33,7 @@ import ArticleScheduleModal from './ArticleScheduleModal';
 import FeaturedManager from './FeaturedManager';
 import { EmptyState } from './EmptyState';
 import { fetchContributors } from '../utils/contributors';
+import { invalidateArticleCache } from '../utils/articleCache';
 import { rbac, ROLE_LABELS, resolveEditorialUser } from '../lib/rbac';
 import { recordAuditLog } from '../lib/invitations';
 import { 
@@ -200,6 +201,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [featuredImage, setFeaturedImage] = useState('');
+  const [coverImageUpdatedAt, setCoverImageUpdatedAt] = useState<number | null>(null);
   const [canvaEmbed, setCanvaEmbed] = useState('');
   const [pdfLink, setPdfLink] = useState('');
   const [readTime, setReadTime] = useState('5 min read');
@@ -754,11 +756,13 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
       const downloadURL = await Promise.race([storageUploadPromise, timeoutPromise]);
       
       setFeaturedImage(downloadURL);
+      setCoverImageUpdatedAt(Date.now());
       setAlert({ text: 'Banner image successfully uploaded to Firebase Storage.', type: 'success' });
     } catch (error: any) {
       console.warn('Firebase Storage upload failed or timed out. Falling back to optimized local Base64...', error);
       // Fallback is already computed, use it instantly!
       setFeaturedImage(base64Data);
+      setCoverImageUpdatedAt(Date.now());
       setAlert({ 
         text: 'Banner uploaded and optimized locally (Firebase Storage fallback triggered).', 
         type: 'success' 
@@ -1286,7 +1290,10 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
       slug: sanitized.slug || slug.trim(),
       category: (sanitized.category as any) || category,
       tags: tags.filter(t => t && !isPlaceholderText(t)),
-      featuredImage: sanitized.featuredImage,
+      featuredImage: sanitized.featuredImage || '',
+      coverImage: sanitized.featuredImage || '',
+      coverImageUrl: sanitized.featuredImage || '',
+      coverImageUpdatedAt: coverImageUpdatedAt || (existingArt && existingArt.featuredImage !== sanitized.featuredImage ? Date.now() : (existingArt?.coverImageUpdatedAt || undefined)),
       canvaEmbed: sanitized.canvaEmbed,
       pdfLink: sanitized.pdfLink,
       authorId: resolvedAuthorId,
@@ -1443,6 +1450,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
       }
 
       clearWriteForm();
+      invalidateArticleCache();
       await refreshArticles();
       localStorage.removeItem('tol_autosave_recovery');
       setActiveTab('articles');
@@ -1461,6 +1469,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
     setTags([]);
     setTagInput('');
     setFeaturedImage('');
+    setCoverImageUpdatedAt(null);
     setCanvaEmbed('');
     setPdfLink('');
     setReadTime('5 min read');
@@ -1518,6 +1527,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
     setCategory(art.category);
     setTags(art.tags || []);
     setFeaturedImage(art.featuredImage || '');
+    setCoverImageUpdatedAt(art.coverImageUpdatedAt || null);
     setCanvaEmbed(art.canvaEmbed || '');
     setPdfLink(art.pdfLink || '');
     setReadTime(art.readTime || '5 min read');
@@ -1596,6 +1606,7 @@ export default function AdminDashboard({ onLogout, allArticles, refreshArticles,
       }).catch(() => {});
       setAlert({ text: 'Article deleted successfully.', type: 'success' });
       setDeleteConfirmArticleId(null);
+      invalidateArticleCache();
       await refreshArticles();
     } catch (e: any) {
       setAlert({ text: `Deletion failed: ${e.message}`, type: 'error' });

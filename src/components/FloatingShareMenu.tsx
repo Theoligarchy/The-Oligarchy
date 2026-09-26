@@ -201,7 +201,7 @@ export default function FloatingShareMenu({
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
             transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="hidden md:flex fixed left-3 lg:left-6 xl:left-10 top-1/2 -translate-y-1/2 z-40 flex-col items-center gap-2 select-none"
+            className="hidden md:flex fixed left-3 lg:left-6 xl:left-10 top-1/2 -translate-y-1/2 z-40 flex-col items-center gap-2 select-none no-print"
             aria-label="Article Share and Reading Toolbar"
             id="desktop-floating-share-rail"
           >
@@ -359,7 +359,7 @@ export default function FloatingShareMenu({
           MOBILE FLOATING ACTION MENU (Visible on small & mobile viewports)
           Fixed in the bottom-right corner with smooth expandable action tray
           ========================================================================= */}
-      <div className="md:hidden fixed bottom-6 right-4 z-40 select-none" id="mobile-floating-share-container">
+      <div className="md:hidden fixed bottom-6 right-4 z-40 select-none no-print" id="mobile-floating-share-container">
         <AnimatePresence>
           {isMobileOpen && (
             <>

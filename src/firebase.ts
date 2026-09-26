@@ -5,6 +5,7 @@ import {
   persistentMultipleTabManager, 
   collection, 
   getDocs, 
+  getDocsFromServer,
   doc, 
   setDoc, 
   query, 
@@ -13,6 +14,7 @@ import {
   limit,
   startAfter,
   getDoc, 
+  getDocFromServer,
   updateDoc, 
   deleteDoc,
   DocumentSnapshot
@@ -58,6 +60,14 @@ INITIAL_SEED_ARTICLES.forEach(art => {
   if (art.slug) fullArticlesCache.set(art.slug, art);
 });
 
+export function clearFullArticlesCache(): void {
+  fullArticlesCache.clear();
+  INITIAL_SEED_ARTICLES.forEach(art => {
+    fullArticlesCache.set(art.id, art);
+    if (art.slug) fullArticlesCache.set(art.slug, art);
+  });
+}
+
 export function resolveArticleAuthorInfo(data: any): { authorId: string; authorName: string } {
   const rawId = (data.authorId || '').trim();
   const rawName = (data.authorName || data.author || '').trim();
@@ -89,6 +99,8 @@ export function parseArticlePreviewDoc(docSnap: DocumentSnapshot): Article {
   const data = (docSnap.data() || {}) as any;
   const artId = docSnap.id;
   const authorInfo = resolveArticleAuthorInfo(data);
+  const rawCover = (data.featuredImage || data.coverImage || data.coverImageUrl || '').trim();
+  const rawCoverVersion = data.coverImageUpdatedAt || data.updatedAt || data.createdAt || undefined;
 
   const preview: Article = {
     id: artId,
@@ -97,7 +109,12 @@ export function parseArticlePreviewDoc(docSnap: DocumentSnapshot): Article {
     slug: data.slug || artId,
     category: data.category || 'criminology',
     tags: Array.isArray(data.tags) ? data.tags : [],
-    featuredImage: data.featuredImage || '',
+    featuredImage: rawCover,
+    coverImage: rawCover,
+    coverImageUrl: rawCover,
+    coverImageUpdatedAt: rawCoverVersion,
+    fromCache: docSnap.metadata ? docSnap.metadata.fromCache : undefined,
+    hasPendingWrites: docSnap.metadata ? docSnap.metadata.hasPendingWrites : undefined,
     canvaEmbed: data.canvaEmbed || '',
     pdfLink: data.pdfLink || '',
     authorId: authorInfo.authorId,
@@ -195,7 +212,15 @@ export async function fetchArticlePreviews(options: FetchArticlesOptions = {}): 
     let snapshot;
 
     try {
-      snapshot = await getDocs(q);
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          snapshot = await getDocsFromServer(q);
+        } catch {
+          snapshot = await getDocs(q);
+        }
+      } else {
+        snapshot = await getDocs(q);
+      }
     } catch (queryErr: any) {
       // Fallback query if composite index is building or missing:
       // Preserve the security-critical status filter so security rules pass without permission denied!
@@ -209,7 +234,15 @@ export async function fetchArticlePreviews(options: FetchArticlesOptions = {}): 
       }
       fallbackConstraints.push(limit(limitCount || 30));
       const fallbackQuery = query(articlesCol, ...fallbackConstraints);
-      snapshot = await getDocs(fallbackQuery);
+      try {
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          snapshot = await getDocsFromServer(fallbackQuery);
+        } else {
+          snapshot = await getDocs(fallbackQuery);
+        }
+      } catch {
+        snapshot = await getDocs(fallbackQuery);
+      }
     }
 
     if (snapshot.empty && !lastDoc) {
@@ -340,12 +373,12 @@ export async function fetchAuthorDraftArticles(userInfo: { uid?: string; email?:
  * Fetches the full multi-thousand-word article body, citations, and version history
  * only when an article is opened for reading or editing.
  */
-export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article | null> {
+export async function fetchFullArticle(articleIdOrSlug: string, forceFresh: boolean = false): Promise<Article | null> {
   if (!articleIdOrSlug) return null;
   const targetKey = articleIdOrSlug.trim();
 
-  // Check in-memory cache first for 0ms response
-  if (fullArticlesCache.has(targetKey)) {
+  // Check in-memory cache first for 0ms response unless forced fresh
+  if (!forceFresh && fullArticlesCache.has(targetKey)) {
     const cached = fullArticlesCache.get(targetKey)!;
     if (cached.content && cached.content.length > 50) {
       return cached;
@@ -353,13 +386,25 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
   }
 
   try {
-    // Attempt direct ID fetch
+    // Attempt direct ID fetch from server first when online
     const artRef = doc(db, 'articles', targetKey);
-    const artSnap = await getDoc(artRef);
+    let artSnap;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        artSnap = await getDocFromServer(artRef);
+      } else {
+        artSnap = await getDoc(artRef);
+      }
+    } catch {
+      artSnap = await getDoc(artRef);
+    }
 
     if (artSnap.exists()) {
       const data = artSnap.data() as any;
       const authorInfo = resolveArticleAuthorInfo(data);
+      const rawCover = (data.featuredImage || data.coverImage || data.coverImageUrl || '').trim();
+      const rawCoverVersion = data.coverImageUpdatedAt || data.updatedAt || data.createdAt || undefined;
+
       const fullArticle: Article = {
         id: artSnap.id,
         title: data.title || '',
@@ -367,7 +412,12 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
         slug: data.slug || artSnap.id,
         category: data.category || 'criminology',
         tags: Array.isArray(data.tags) ? data.tags : [],
-        featuredImage: data.featuredImage || '',
+        featuredImage: rawCover,
+        coverImage: rawCover,
+        coverImageUrl: rawCover,
+        coverImageUpdatedAt: rawCoverVersion,
+        fromCache: artSnap.metadata ? artSnap.metadata.fromCache : undefined,
+        hasPendingWrites: artSnap.metadata ? artSnap.metadata.hasPendingWrites : undefined,
         canvaEmbed: data.canvaEmbed || '',
         pdfLink: data.pdfLink || '',
         authorId: authorInfo.authorId,
@@ -394,6 +444,7 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
         views: typeof data.views === 'number' ? data.views : 0,
         isFeatured: Boolean(data.isFeatured),
         isPinned: Boolean(data.isPinned),
+        featuredOrder: data.featuredOrder,
         seriesName: data.seriesName || '',
         seriesPart: data.seriesPart,
         sources: Array.isArray(data.sources) ? data.sources : [],
@@ -408,13 +459,34 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
       return fullArticle;
     }
 
-    // If ID didn't match, query by slug
-    const slugQuery = query(collection(db, 'articles'), where('slug', '==', targetKey), limit(1));
-    const slugSnap = await getDocs(slugQuery);
+    // If ID didn't match, query by slug with orderBy createdAt desc
+    let slugSnap;
+    try {
+      const slugQuery = query(collection(db, 'articles'), where('slug', '==', targetKey), orderBy('createdAt', 'desc'), limit(1));
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        slugSnap = await getDocsFromServer(slugQuery);
+      } else {
+        slugSnap = await getDocs(slugQuery);
+      }
+    } catch {
+      // Fallback query without orderBy
+      const fallbackSlugQuery = query(collection(db, 'articles'), where('slug', '==', targetKey), limit(5));
+      slugSnap = await getDocs(fallbackSlugQuery);
+    }
+
     if (!slugSnap.empty) {
-      const docSnap = slugSnap.docs[0];
+      // If multiple, sort newest first
+      const docsSorted = [...slugSnap.docs].sort((a, b) => {
+        const aCreated = a.data()?.createdAt || 0;
+        const bCreated = b.data()?.createdAt || 0;
+        return bCreated - aCreated;
+      });
+      const docSnap = docsSorted[0];
       const data = docSnap.data() as any;
       const authorInfo = resolveArticleAuthorInfo(data);
+      const rawCover = (data.featuredImage || data.coverImage || data.coverImageUrl || '').trim();
+      const rawCoverVersion = data.coverImageUpdatedAt || data.updatedAt || data.createdAt || undefined;
+
       const fullArticle: Article = {
         id: docSnap.id,
         title: data.title || '',
@@ -422,7 +494,12 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
         slug: data.slug || docSnap.id,
         category: data.category || 'criminology',
         tags: Array.isArray(data.tags) ? data.tags : [],
-        featuredImage: data.featuredImage || '',
+        featuredImage: rawCover,
+        coverImage: rawCover,
+        coverImageUrl: rawCover,
+        coverImageUpdatedAt: rawCoverVersion,
+        fromCache: docSnap.metadata ? docSnap.metadata.fromCache : undefined,
+        hasPendingWrites: docSnap.metadata ? docSnap.metadata.hasPendingWrites : undefined,
         canvaEmbed: data.canvaEmbed || '',
         pdfLink: data.pdfLink || '',
         authorId: authorInfo.authorId,
@@ -449,6 +526,7 @@ export async function fetchFullArticle(articleIdOrSlug: string): Promise<Article
         views: typeof data.views === 'number' ? data.views : 0,
         isFeatured: Boolean(data.isFeatured),
         isPinned: Boolean(data.isPinned),
+        featuredOrder: data.featuredOrder,
         seriesName: data.seriesName || '',
         seriesPart: data.seriesPart,
         sources: Array.isArray(data.sources) ? data.sources : [],

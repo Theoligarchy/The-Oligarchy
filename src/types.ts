@@ -48,6 +48,11 @@ export interface Article {
   category: 'criminology' | 'psyche' | 'politics';
   tags: string[];
   featuredImage?: string;
+  coverImage?: string; // Unified cover image alias
+  coverImageUrl?: string; // Canonical cover image URL alias
+  coverImageUpdatedAt?: number; // Cache-busting timestamp when image was uploaded or replaced
+  fromCache?: boolean; // True if loaded from local persistence cache
+  hasPendingWrites?: boolean; // True if document has unsynced local mutations
   canvaEmbed?: string; // HTML iframe or Link
   pdfLink?: string; // Research report PDF download link
   authorId: string;

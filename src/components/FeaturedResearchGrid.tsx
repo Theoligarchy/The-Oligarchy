@@ -3,7 +3,7 @@ import { Article } from '../types';
 import { Clock, Calendar, ArrowRight, Eye } from 'lucide-react';
 import ShareMenu from './ShareMenu';
 import BookmarkButton from './BookmarkButton';
-import { getOptimizedImageUrl } from '../utils/imageOptimizer';
+import { getOptimizedImageUrl, getArticleCoverImage, getArticleCoverVersion } from '../utils/imageOptimizer';
 
 interface FeaturedResearchGridProps {
   articles: Article[];
@@ -64,22 +64,26 @@ export default function FeaturedResearchGrid({
               {/* Card Top: Banner Image & Category */}
               <div className="flex flex-col flex-grow">
                 <div className="w-full h-44 sm:h-48 lg:h-40 xl:h-44 overflow-hidden relative bg-ink border-b border-paper/10 shrink-0">
-                  {article.featuredImage ? (
-                    <img
-                      src={getOptimizedImageUrl(article.featuredImage, 'card')}
-                      alt={article.title}
-                      loading="lazy"
-                      decoding="async"
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-[1.04] transition-all duration-700 ease-out"
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-gradient-to-br from-blood/25 via-midnight to-ink flex items-center justify-center p-6 text-center">
-                      <span className="font-serif italic text-paper/30 text-xs tracking-wider">
-                        The Oligarchy Research Dossier
-                      </span>
-                    </div>
-                  )}
+                  {(() => {
+                    const coverUrl = getArticleCoverImage(article);
+                    const coverVer = getArticleCoverVersion(article);
+                    return coverUrl ? (
+                      <img
+                        src={getOptimizedImageUrl(coverUrl, 'card', coverVer)}
+                        alt={article.title}
+                        loading="lazy"
+                        decoding="async"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-[1.04] transition-all duration-700 ease-out"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-blood/25 via-midnight to-ink flex items-center justify-center p-6 text-center">
+                        <span className="font-serif italic text-paper/30 text-xs tracking-wider">
+                          The Oligarchy Research Dossier
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                   {/* Gradient vignette */}
                   <div className="absolute inset-0 bg-gradient-to-t from-navy/95 via-navy/20 to-transparent pointer-events-none" />

@@ -3,7 +3,7 @@ import { Article } from '../types';
 import { Eye, Clock, Calendar } from 'lucide-react';
 import ShareMenu from './ShareMenu';
 import BookmarkButton from './BookmarkButton';
-import { getOptimizedImageUrl } from '../utils/imageOptimizer';
+import { getOptimizedImageUrl, getArticleCoverImage, getArticleCoverVersion } from '../utils/imageOptimizer';
 
 interface ArticleCardProps {
   key?: string;
@@ -14,16 +14,19 @@ interface ArticleCardProps {
 }
 
 export default function ArticleCard({ article, onClick, isSaved = false, onToggleSave }: ArticleCardProps) {
+  const coverUrl = getArticleCoverImage(article);
+  const coverVer = getArticleCoverVersion(article);
+
   return (
     <article 
       onClick={onClick}
       className="bg-navy border border-paper/10 overflow-hidden flex flex-col cursor-pointer hover:bg-paper/[0.02] hover:border-blood/40 transition-all duration-300 group rounded-sm select-none"
     >
       {/* Optional Featured Thumbnail Header with native lazy loading and CDN query optimization */}
-      {article.featuredImage && (
+      {coverUrl && (
         <div className="w-full h-44 sm:h-48 overflow-hidden relative bg-ink/60 border-b border-paper/10">
           <img 
-            src={getOptimizedImageUrl(article.featuredImage, 'card')}
+            src={getOptimizedImageUrl(coverUrl, 'card', coverVer)}
             alt={article.title}
             loading="lazy"
             decoding="async"

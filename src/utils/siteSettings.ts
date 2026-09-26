@@ -86,51 +86,80 @@ function cleanPayload<T>(obj: T): T {
   return obj;
 }
 
+const SETTINGS_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes freshness
+
 /**
- * Loads site settings with in-memory & localStorage fallback for lightning-fast render
+ * Loads site settings with in-memory & localStorage fallback for lightning-fast render,
+ * coupled with background revalidation to guarantee freshness without serving stale config.
  */
-export async function fetchSiteSettings(): Promise<SiteSettings> {
-  // 1. Check local cache first
+export async function fetchSiteSettings(forceFresh: boolean = false): Promise<SiteSettings> {
+  let cachedSettings: SiteSettings | null = null;
+  let isStale = true;
+
+  // 1. Check local cache
   try {
     const cached = localStorage.getItem(STORAGE_KEY);
     if (cached) {
       const parsed = JSON.parse(cached);
-      return { ...DEFAULT_SITE_SETTINGS, ...parsed };
+      if (parsed && typeof parsed === 'object') {
+        const timestamp = parsed._cachedAt || 0;
+        isStale = Date.now() - timestamp > SETTINGS_CACHE_TTL_MS;
+        const { _cachedAt, ...settingsData } = parsed;
+        cachedSettings = { ...DEFAULT_SITE_SETTINGS, ...settingsData };
+      }
     }
   } catch (e) {
     console.warn('LocalStorage read error for site settings:', e);
   }
 
-  // 2. Fetch from Firestore
-  try {
-    const settingsDoc = await getDoc(doc(db, 'settings', 'site_config'));
-    if (settingsDoc.exists()) {
-      const data = settingsDoc.data() as Partial<SiteSettings>;
-      const merged: SiteSettings = { 
-        ...DEFAULT_SITE_SETTINGS, 
-        ...data,
-        socials: {
-          ...DEFAULT_SITE_SETTINGS.socials,
-          ...(data.socials || {})
-        }
-      };
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-      } catch (e) {}
-      return merged;
-    }
-  } catch (err) {
-    console.warn('Firestore site settings fetch failed, using defaults:', err);
+  // If we have fresh cached settings and not forcing fresh, return immediately
+  if (cachedSettings && !isStale && !forceFresh) {
+    return cachedSettings;
   }
 
-  return DEFAULT_SITE_SETTINGS;
+  // Background or synchronous fetcher from Firestore
+  const fetchFromServer = async (): Promise<SiteSettings> => {
+    try {
+      const settingsDoc = await getDoc(doc(db, 'settings', 'site_config'));
+      if (settingsDoc.exists()) {
+        const data = settingsDoc.data() as Partial<SiteSettings>;
+        const merged: SiteSettings = { 
+          ...DEFAULT_SITE_SETTINGS, 
+          ...data,
+          socials: {
+            ...DEFAULT_SITE_SETTINGS.socials,
+            ...(data.socials || {})
+          }
+        };
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...merged, _cachedAt: Date.now() }));
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('tol_site_settings_updated', { detail: merged }));
+          }
+        } catch (e) {}
+        return merged;
+      }
+    } catch (err) {
+      console.warn('Firestore site settings fetch failed, using fallback:', err);
+    }
+    return cachedSettings || DEFAULT_SITE_SETTINGS;
+  };
+
+  // If stale but cached exists and !forceFresh, return cached immediately while revalidating in background
+  if (cachedSettings && !forceFresh) {
+    fetchFromServer().catch(() => {});
+    return cachedSettings;
+  }
+
+  // Otherwise await fresh data
+  return await fetchFromServer();
 }
 
 /**
  * Saves updated site settings to Firestore & localStorage
  */
 export async function saveSiteSettings(updated: Partial<SiteSettings>): Promise<SiteSettings> {
-  const current = await fetchSiteSettings();
+  const current = await fetchSiteSettings(true);
   const merged: SiteSettings = {
     ...current,
     ...updated,
@@ -148,8 +177,14 @@ export async function saveSiteSettings(updated: Partial<SiteSettings>): Promise<
 
   // Update local cache
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-  } catch (e) {}
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...merged, _cachedAt: Date.now() }));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tol_site_settings_updated', { detail: merged }));
+    }
+  } catch (e) {
+    console.error('Failed to write site settings to local cache:', e);
+  }
 
   return merged;
 }
+

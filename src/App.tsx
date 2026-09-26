@@ -51,7 +51,7 @@ import {
 } from './utils/savedArticles';
 import { fetchEditorialTeam } from './lib/rbac';
 import { motion, AnimatePresence } from 'motion/react';
-import { getOptimizedImageUrl } from './utils/imageOptimizer';
+import { getOptimizedImageUrl, getArticleCoverImage, getArticleCoverVersion } from './utils/imageOptimizer';
 import { getCachedArticles, setCachedArticles } from './utils/articleCache';
 import { fetchContributors } from './utils/contributors';
 
@@ -75,7 +75,8 @@ import {
   MessageSquare,
   Link,
   AlertCircle,
-  Lock
+  Lock,
+  Printer
 } from 'lucide-react';
 
 import MarginaliaPanel from './components/MarginaliaPanel';
@@ -183,12 +184,25 @@ export default function App() {
       setTimeout(() => setToastMessage(null), 4000);
     };
 
+    const handleCacheInvalidated = () => {
+      loadData();
+    };
+    const handleSettingsUpdated = (e: any) => {
+      if (e.detail) {
+        setSiteSettings(e.detail);
+      }
+    };
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    window.addEventListener('tol_article_cache_invalidated', handleCacheInvalidated);
+    window.addEventListener('tol_site_settings_updated', handleSettingsUpdated);
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('tol_article_cache_invalidated', handleCacheInvalidated);
+      window.removeEventListener('tol_site_settings_updated', handleSettingsUpdated);
     };
   }, []);
 
@@ -238,7 +252,7 @@ export default function App() {
     if (activeTab === 'article-view' && selectedArticle) {
       title = selectedArticle.seoTitle || selectedArticle.metaTitle || `${selectedArticle.title} : The Oligarchy`;
       desc = selectedArticle.seoDescription || selectedArticle.metaDescription || selectedArticle.excerpt || desc;
-      image = selectedArticle.featuredImage || image;
+      image = getArticleCoverImage(selectedArticle) || image;
       url = selectedArticle.canonicalUrl || `https://theoligarchy.in/?article=${selectedArticle.id}`;
     } else if (activeTab === 'about') {
       title = "About Us : The Oligarchy";
@@ -442,17 +456,44 @@ export default function App() {
           // ignore
         }
 
-        // Find article matching by id, slug, or slugified title (with robust fallback for spaces vs hyphens)
+        // Find article matching with strict priority:
+        // 1. Exact document ID
+        // 2. Exact slug string
+        // 3. Normalized slug (handling hyphens/spaces), newest first if multiple series parts share slug
+        // 4. Subtitle match
+        // 5. Title match as fallback (newest or featured first if multiple series parts share title)
         const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').trim();
         const normalizedTarget = normalize(decodedId);
 
-        const sharedArticle = sortedArticles.find(a => 
-          a.id === decodedId || 
-          a.id === urlArticleId ||
-          (a.slug && a.slug.trim() === decodedId) ||
-          (a.slug && normalize(a.slug) === normalizedTarget) ||
-          (a.title && normalize(a.title) === normalizedTarget)
-        );
+        let sharedArticle = sortedArticles.find(a => a.id === decodedId || a.id === urlArticleId);
+
+        if (!sharedArticle) {
+          sharedArticle = sortedArticles.find(a => a.slug && a.slug.trim() === decodedId);
+        }
+
+        if (!sharedArticle) {
+          const slugMatches = sortedArticles.filter(a => a.slug && normalize(a.slug) === normalizedTarget);
+          if (slugMatches.length === 1) {
+            sharedArticle = slugMatches[0];
+          } else if (slugMatches.length > 1) {
+            sharedArticle = slugMatches.find(a => a.isFeatured && a.featuredOrder === 1) 
+              || slugMatches.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+          }
+        }
+
+        if (!sharedArticle) {
+          sharedArticle = sortedArticles.find(a => a.subtitle && normalize(a.subtitle).includes(normalizedTarget));
+        }
+
+        if (!sharedArticle) {
+          const titleMatches = sortedArticles.filter(a => a.title && normalize(a.title) === normalizedTarget);
+          if (titleMatches.length === 1) {
+            sharedArticle = titleMatches[0];
+          } else if (titleMatches.length > 1) {
+            sharedArticle = titleMatches.find(a => a.isFeatured && a.featuredOrder === 1) 
+              || titleMatches.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+          }
+        }
         
         if (sharedArticle) {
           setSelectedArticle(sharedArticle);
@@ -510,13 +551,32 @@ export default function App() {
       try { decodedId = decodeURIComponent(urlArticleId).trim(); } catch (e) {}
       const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').trim();
       const normalizedTarget = normalize(decodedId);
-      const matched = articles.find(a => 
-        a.id === decodedId || 
-        a.id === urlArticleId ||
-        (a.slug && a.slug.trim() === decodedId) ||
-        (a.slug && normalize(a.slug) === normalizedTarget) ||
-        (a.title && normalize(a.title) === normalizedTarget)
-      );
+      
+      let matched = articles.find(a => a.id === decodedId || a.id === urlArticleId);
+      if (!matched) {
+        matched = articles.find(a => a.slug && a.slug.trim() === decodedId);
+      }
+      if (!matched) {
+        const slugMatches = articles.filter(a => a.slug && normalize(a.slug) === normalizedTarget);
+        if (slugMatches.length === 1) {
+          matched = slugMatches[0];
+        } else if (slugMatches.length > 1) {
+          matched = slugMatches.find(a => a.isFeatured && a.featuredOrder === 1) 
+            || slugMatches.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+        }
+      }
+      if (!matched) {
+        matched = articles.find(a => a.subtitle && normalize(a.subtitle).includes(normalizedTarget));
+      }
+      if (!matched) {
+        const titleMatches = articles.filter(a => a.title && normalize(a.title) === normalizedTarget);
+        if (titleMatches.length === 1) {
+          matched = titleMatches[0];
+        } else if (titleMatches.length > 1) {
+          matched = titleMatches.find(a => a.isFeatured && a.featuredOrder === 1) 
+            || titleMatches.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+        }
+      }
       if (matched) {
         setSelectedArticle(matched);
         setActiveTab('article-view');
@@ -1139,10 +1199,10 @@ export default function App() {
     <div className="min-h-screen flex flex-col justify-between bg-[#080808] text-[#e0e0e0]">
       
       {/* Scroll Progress Indicator Bar */}
-      <div className="fixed top-0 left-0 w-full h-[3px] bg-blood z-[999]" id="scroll-bar" />
+      <div className="fixed top-0 left-0 w-full h-[3px] bg-blood z-[999] no-print" id="scroll-bar" />
 
       {/* Decorative Dark Gothic Academic Watermark Rail */}
-      <div className="fixed right-0 top-1/2 -translate-y-1/2 hidden xl:flex flex-col gap-12 pr-6 pointer-events-none z-10 select-none">
+      <div className="fixed right-0 top-1/2 -translate-y-1/2 hidden xl:flex flex-col gap-12 pr-6 pointer-events-none z-10 select-none no-print" id="academic-watermark-rail">
         <div className="[writing-mode:vertical-rl] text-[9px] uppercase tracking-[0.55em] text-paper/10 font-extrabold">
           ANALYTIC • RIGOROUS • HUMAN
         </div>
@@ -1167,7 +1227,7 @@ export default function App() {
 
       {/* Offline Mode Graceful Fallback Banner */}
       {!isOnline && (
-        <div className="bg-amber-950/60 border-b border-amber-800/40 px-4 py-2 text-center text-xs font-sans text-amber-200/90 flex items-center justify-center gap-2 sticky top-0 z-50 backdrop-blur-sm">
+        <div className="bg-amber-950/60 border-b border-amber-800/40 px-4 py-2 text-center text-xs font-sans text-amber-200/90 flex items-center justify-center gap-2 sticky top-0 z-50 backdrop-blur-sm no-print" id="offline-archival-banner">
           <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
           <span>Offline Archival Mode Active — Full research library and bookmarked papers remain available from instant local storage.</span>
         </div>
@@ -1831,9 +1891,10 @@ export default function App() {
           isArticleViewLoading || !selectedArticle ? (
             <ArticleSkeleton />
           ) : (
-            <div className="py-8 sm:py-12 md:py-16 px-4 sm:px-6 md:px-8 max-w-4xl mx-auto fade-in select-text">
+            <div className="py-8 sm:py-12 md:py-16 px-4 sm:px-6 md:px-8 max-w-4xl mx-auto fade-in select-text print:p-0 print:m-0 print:max-w-none">
             {/* Back to Home Navigation */}
             <button 
+              id="article-back-btn"
               onClick={() => {
                 setSelectedArticle(null);
                 setActiveTab('home');
@@ -1841,31 +1902,51 @@ export default function App() {
                 const newUrl = window.location.origin;
                 window.history.pushState({ path: newUrl }, '', newUrl);
               }}
-              className="font-sans text-[9px] font-bold tracking-widest uppercase border border-paper/10 text-paper/45 hover:border-blood hover:text-paper py-2 px-5 mb-10 inline-flex items-center gap-1.5 cursor-pointer rounded-sm"
+              className="font-sans text-[9px] font-bold tracking-widest uppercase border border-paper/10 text-paper/45 hover:border-blood hover:text-paper py-2 px-5 mb-10 inline-flex items-center gap-1.5 cursor-pointer rounded-sm no-print"
             >
               <ArrowLeft size={10} /> Back to Analyses
             </button>
 
+            {/* High-Fidelity Physical Print Masthead (Rendered strictly for print offprints) */}
+            <div className="hidden print:block print:mb-6 print:pb-3 print-header-masthead">
+              <div className="flex justify-between items-baseline border-b-2 border-black pb-2 mb-2">
+                <div>
+                  <span className="font-gothic text-3xl font-normal text-black block leading-none">THE OLIGARCHY</span>
+                  <span className="font-sans text-[7.5pt] uppercase tracking-[0.25em] text-neutral-700 font-bold block mt-1">
+                    Journal of Critical Inquiry · Forensic Analysis &amp; Empirical Research
+                  </span>
+                </div>
+                <div className="text-right font-sans text-[7.5pt] uppercase tracking-wider text-neutral-600">
+                  <div className="font-bold">Scholarly Offprint</div>
+                  <div className="font-mono text-[7pt]">https://theoligarchy.in</div>
+                </div>
+              </div>
+            </div>
+
             {/* Article Container Block */}
-            <article className="flex flex-col gap-6 select-text selection:bg-blood selection:text-paper">
+            <article className="flex flex-col gap-6 select-text selection:bg-blood selection:text-paper article-print-container">
               
               {/* Image banner display */}
-              {selectedArticle.featuredImage && !selectedArticle.canvaEmbed && (
-                <div className="article-banner-container overflow-hidden rounded-sm border border-paper/10 mb-2 relative">
-                  <img 
-                    src={getOptimizedImageUrl(selectedArticle.featuredImage, 'banner')} 
-                    alt={selectedArticle.title} 
-                    className="article-banner-img select-none"
-                    referrerPolicy="no-referrer"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                  <div className="article-banner-gradient absolute inset-0 pointer-events-none bg-gradient-to-t from-midnight/40 to-transparent" />
-                </div>
-              )}
+              {(() => {
+                const bannerUrl = getArticleCoverImage(selectedArticle);
+                const bannerVer = getArticleCoverVersion(selectedArticle);
+                return bannerUrl && !selectedArticle.canvaEmbed ? (
+                  <div className="article-banner-container overflow-hidden rounded-sm border border-paper/10 mb-2 relative print:border-none print:m-0">
+                    <img 
+                      src={getOptimizedImageUrl(bannerUrl, 'banner', bannerVer)} 
+                      alt={selectedArticle.title} 
+                      className="article-banner-img select-none print:max-h-[260px] print:object-contain print:mx-auto"
+                      referrerPolicy="no-referrer"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <div className="article-banner-gradient absolute inset-0 pointer-events-none bg-gradient-to-t from-midnight/40 to-transparent print:hidden" />
+                  </div>
+                ) : null;
+              })()}
 
               {/* Article Upper Metadata */}
-              <div className="flex flex-wrap gap-3 items-center">
+              <div className="flex flex-wrap gap-3 items-center article-upper-metadata">
                 <span className={`font-sans text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-sm border ${
                   selectedArticle.category === 'criminology' 
                     ? 'bg-red-950/10 text-red-400 border-red-900/30' 
@@ -1903,7 +1984,7 @@ export default function App() {
               </div>
 
               {/* Action Row: Reference Report PDF & Sharing Menu */}
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-paper/10 pb-4 mt-2">
+              <div id="article-actions-row" className="flex flex-wrap items-center justify-between gap-4 border-b border-paper/10 pb-4 mt-2 no-print">
                 <div className="flex flex-wrap gap-2.5">
                   {selectedArticle.pdfLink && (
                     <a 
@@ -1922,6 +2003,13 @@ export default function App() {
                     title="Compile a fresh, beautifully typeset scholarly PDF offprint in multi-column format with bibliography"
                   >
                     <FileText size={10} /> Compile Scholarly PDF <Download size={10} />
+                  </button>
+                  <button 
+                    onClick={() => window.print()}
+                    className="bg-paper/5 border border-paper/15 hover:bg-paper/10 text-paper/80 hover:text-paper font-sans text-[9px] font-bold tracking-widest uppercase py-2.5 px-4 rounded-sm flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Print high-fidelity single-column physical offprint (Ctrl+P / Cmd+P)"
+                  >
+                    <Printer size={10} /> Print Offprint
                   </button>
                 </div>
 
@@ -1948,18 +2036,18 @@ export default function App() {
               </div>
 
               {/* Big Display Headings */}
-              <h1 className="font-display text-3xl md:text-5xl font-extrabold text-paper leading-tight tracking-tight mt-2">
+              <h1 className="font-display text-3xl md:text-5xl font-extrabold text-paper leading-tight tracking-tight mt-2 article-title">
                 {selectedArticle.title}
               </h1>
 
               {selectedArticle.subtitle && (
-                <h2 className="font-display text-lg md:text-xl italic text-paper/50 leading-relaxed -mt-2">
+                <h2 className="font-display text-lg md:text-xl italic text-paper/50 leading-relaxed -mt-2 article-subtitle">
                   {selectedArticle.subtitle}
                 </h2>
               )}
 
               {/* Scholarly journal style multi-author attribution banner */}
-              <div className="my-2">
+              <div className="my-2 article-author-attribution">
                 <MultiAuthorAttribution 
                   article={selectedArticle}
                   onSelectContributor={(authorId) => {
@@ -1972,7 +2060,7 @@ export default function App() {
 
               {/* ARTICLE BODY OR RESPONSIVE CANVA ENGINE EMBED */}
               {!selectedArticle.canvaEmbed && (
-                <div className="flex flex-col sm:flex-row justify-between items-center bg-navy/20 border border-paper/10 p-4 rounded-sm mb-4 select-none gap-4">
+                <div id="debate-portal-callout" className="flex flex-col sm:flex-row justify-between items-center bg-navy/20 border border-paper/10 p-4 rounded-sm mb-4 select-none gap-4 no-print">
                   <div className="flex items-center gap-3">
                     <Award size={18} className="text-blood shrink-0" />
                     <div>
@@ -2010,7 +2098,7 @@ export default function App() {
 
               {/* Custom Tags chips footer */}
               {(selectedArticle.tags || []).length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-paper/5">
+                <div id="article-tags-footer" className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-paper/5 no-print">
                   {selectedArticle.tags.map((tag) => (
                     <span 
                       key={tag} 
@@ -2035,11 +2123,13 @@ export default function App() {
               <SourcesSection sources={selectedArticle.sources || []} />
 
               {/* Automated Citation Generator for Academics & Researchers */}
-              <CitationGenerator article={selectedArticle} />
+              <div id="citation-generator-section" className="no-print">
+                <CitationGenerator article={selectedArticle} />
+              </div>
 
               {/* Automated "Recommended for You" / Related Investigations Footer */}
               {relatedInvestigations.length > 0 && (
-                <div className="border border-paper/10 bg-[#0a0a0a] p-6 rounded-sm mt-10 select-none shadow-md">
+                <div id="related-investigations-section" className="border border-paper/10 bg-[#0a0a0a] p-6 rounded-sm mt-10 select-none shadow-md no-print">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 mb-5 border-b border-paper/10 pb-4">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
@@ -2069,19 +2159,23 @@ export default function App() {
                         }}
                         className="group border border-paper/10 hover:border-blood/60 rounded-sm bg-navy/40 hover:bg-navy/80 cursor-pointer transition-all flex flex-col justify-between shadow-sm overflow-hidden"
                       >
-                        {relArt.featuredImage && (
-                          <div className="w-full h-28 overflow-hidden relative bg-ink/60 border-b border-paper/10">
-                            <img 
-                              src={getOptimizedImageUrl(relArt.featuredImage, 'thumbnail')}
-                              alt={relArt.title}
-                              loading="lazy"
-                              decoding="async"
-                              referrerPolicy="no-referrer"
-                              className="w-full h-full object-cover opacity-75 group-hover:opacity-100 group-hover:scale-105 transition-all duration-300"
-                            />
-                            <div className="absolute inset-0 bg-gradient-to-t from-navy/90 via-transparent to-transparent" />
-                          </div>
-                        )}
+                        {(() => {
+                          const relCover = getArticleCoverImage(relArt);
+                          const relVer = getArticleCoverVersion(relArt);
+                          return relCover ? (
+                            <div className="w-full h-28 overflow-hidden relative bg-ink/60 border-b border-paper/10">
+                              <img 
+                                src={getOptimizedImageUrl(relCover, 'thumbnail', relVer)}
+                                alt={relArt.title}
+                                loading="lazy"
+                                decoding="async"
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover opacity-75 group-hover:opacity-100 group-hover:scale-105 transition-all duration-300"
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-navy/90 via-transparent to-transparent" />
+                            </div>
+                          ) : null;
+                        })()}
 
                         <div className="p-4 space-y-2.5 flex-1 flex flex-col justify-between">
                           <div>
@@ -2142,19 +2236,21 @@ export default function App() {
               )}
 
               {/* Scholarly Author Bio Card & More By This Author Section */}
-              <AuthorBioCard
-                currentArticle={selectedArticle}
-                allArticles={articles}
-                contributors={contributors}
-                onSelectArticle={handleArticleClick}
-                onSelectContributor={(contributorIdOrName) => {
-                  setSelectedContributorId(contributorIdOrName);
-                  setActiveTab('contributors');
-                }}
-              />
+              <div id="author-bio-section" className="no-print">
+                <AuthorBioCard
+                  currentArticle={selectedArticle}
+                  allArticles={articles}
+                  contributors={contributors}
+                  onSelectArticle={handleArticleClick}
+                  onSelectContributor={(contributorIdOrName) => {
+                    setSelectedContributorId(contributorIdOrName);
+                    setActiveTab('contributors');
+                  }}
+                />
+              </div>
 
               {/* In-Article Research Brief Newsletter Conversion Card */}
-              <div className="border border-paper/15 bg-navy/90 p-8 rounded-sm mt-12 mb-6 text-center select-none shadow-xl relative overflow-hidden">
+              <div id="in-article-newsletter" className="border border-paper/15 bg-navy/90 p-8 rounded-sm mt-12 mb-6 text-center select-none shadow-xl relative overflow-hidden no-print">
                 <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blood via-blood-light to-blood" />
                 <span className="font-sans text-[10px] font-bold tracking-[0.3em] uppercase text-blood">
                   Continue The Inquiry
@@ -2200,6 +2296,16 @@ export default function App() {
                     </button>
                   </form>
                 )}
+              </div>
+
+              {/* Physical Print Offprint Colophon (Rendered strictly in physical print / offprint PDF) */}
+              <div className="hidden print:block print:mt-10 print:pt-4 print:border-t-2 print:border-black print:text-[8pt] print:text-neutral-600 print:font-serif print:text-center print:break-inside-avoid">
+                <p className="print:m-0 print:italic">
+                  Published by The Oligarchy ({selectedArticle.originalPublishedAt || selectedArticle.publishDate || (selectedArticle.createdAt ? new Date(selectedArticle.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Archival Record')}). Single-column archival offprint for research and physical citation.
+                </p>
+                <div className="font-mono text-[7pt] text-neutral-500 mt-1 uppercase tracking-wider">
+                  The Oligarchy Journal · https://theoligarchy.in
+                </div>
               </div>
 
             </article>
@@ -2260,7 +2366,7 @@ export default function App() {
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 50, scale: 0.9 }}
-            className="fixed bottom-6 right-6 z-[9999] bg-[#0c0c0c] border border-blood/50 text-paper px-4 py-3 rounded-sm shadow-2xl flex items-center gap-2.5 font-sans text-xs select-none max-w-sm"
+            className="fixed bottom-6 right-6 z-[9999] bg-[#0c0c0c] border border-blood/50 text-paper px-4 py-3 rounded-sm shadow-2xl flex items-center gap-2.5 font-sans text-xs select-none max-w-sm no-print"
             id="toast-notification-banner"
           >
             <CheckCircle2 size={16} className="text-blood-light" />

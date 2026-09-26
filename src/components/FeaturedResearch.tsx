@@ -3,7 +3,7 @@ import { Article } from '../types';
 import { Eye, Clock, Download, FileText, ArrowRight } from 'lucide-react';
 import ShareMenu from './ShareMenu';
 import BookmarkButton from './BookmarkButton';
-import { getOptimizedImageUrl } from '../utils/imageOptimizer';
+import { getOptimizedImageUrl, getArticleCoverImage, getArticleCoverVersion } from '../utils/imageOptimizer';
 
 interface FeaturedResearchProps {
   article: Article;
@@ -18,6 +18,9 @@ export default function FeaturedResearch({
   isSaved = false, 
   onToggleSave 
 }: FeaturedResearchProps) {
+  const coverUrl = getArticleCoverImage(article);
+  const coverVer = getArticleCoverVersion(article);
+
   return (
     <div 
       onClick={onClick}
@@ -25,9 +28,9 @@ export default function FeaturedResearch({
     >
       {/* Left: High-Res Banner Media Column */}
       <div className="md:col-span-5 min-h-[250px] md:min-h-[380px] relative overflow-hidden bg-ink flex flex-col justify-end p-6 md:p-8">
-        {article.featuredImage ? (
+        {coverUrl ? (
           <img 
-            src={getOptimizedImageUrl(article.featuredImage, 'banner')} 
+            src={getOptimizedImageUrl(coverUrl, 'banner', coverVer)} 
             alt={article.title}
             className="absolute inset-0 w-full h-full object-cover opacity-35 group-hover:scale-[1.03] transition-transform duration-700 ease-out"
             referrerPolicy="no-referrer"

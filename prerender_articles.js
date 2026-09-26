@@ -114,7 +114,8 @@ function prerenderArticlePage(baseTemplate, article, targetDir) {
   const title = article.seoTitle || `${article.title} — The Oligarchy`;
   const desc = article.seoDescription || article.excerpt || article.subtitle || 
     'An independent peer-reviewed and scholarly archive dedicated to investigating criminology, criminal psychology, and political power systems.';
-  const image = article.featuredImage || 'https://theoligarchy.in/logo_highres.png';
+  const rawImage = article.coverImageUrl || article.coverImage || article.featuredImage || '';
+  const image = (rawImage && rawImage.startsWith('http')) ? rawImage : 'https://theoligarchy.in/logo_highres.png';
   
   const articleSlug = article.slug ? article.slug.trim() : article.id;
   const absoluteUrl = `https://theoligarchy.in/post/${encodeURIComponent(articleSlug)}`;

@@ -48,6 +48,12 @@ interface ArticleData {
   slug: string;
   excerpt: string;
   featuredImage?: string;
+  coverImage?: string;
+  coverImageUrl?: string;
+  coverImageUpdatedAt?: number;
+  isFeatured?: boolean;
+  featuredOrder?: number;
+  createdAt?: number;
   seoTitle?: string;
   seoDescription?: string;
 }
@@ -86,6 +92,12 @@ function parseFirestoreDoc(doc: any): ArticleData | null {
     slug: parseFirestoreValue(fields.slug) || '',
     excerpt: parseFirestoreValue(fields.excerpt) || '',
     featuredImage: parseFirestoreValue(fields.featuredImage) || '',
+    coverImage: parseFirestoreValue(fields.coverImage) || undefined,
+    coverImageUrl: parseFirestoreValue(fields.coverImageUrl) || undefined,
+    coverImageUpdatedAt: parseFirestoreValue(fields.coverImageUpdatedAt) || undefined,
+    isFeatured: parseFirestoreValue(fields.isFeatured) || false,
+    featuredOrder: parseFirestoreValue(fields.featuredOrder) || undefined,
+    createdAt: parseFirestoreValue(fields.createdAt) || 0,
     seoTitle: parseFirestoreValue(fields.seoTitle) || '',
     seoDescription: parseFirestoreValue(fields.seoDescription) || '',
   };
@@ -166,21 +178,40 @@ async function getArticleByIdOrSlug(idOrSlug: string): Promise<ArticleData | nul
     if (response.ok) {
       const results = await response.json();
       if (Array.isArray(results)) {
+        const candidateArticles: ArticleData[] = [];
         for (const item of results) {
           if (item.document) {
             const article = parseFirestoreDoc(item.document);
-            if (article) {
-              if (
-                article.id === decoded ||
-                article.id === idOrSlug ||
-                (article.slug && article.slug.trim() === decoded) ||
-                (article.slug && normalize(article.slug) === normalizedTarget) ||
-                (article.title && normalize(article.title) === normalizedTarget)
-              ) {
-                return article;
-              }
-            }
+            if (article) candidateArticles.push(article);
           }
+        }
+
+        // 1. Exact ID match
+        let found = candidateArticles.find(a => a.id === decoded || a.id === idOrSlug);
+        if (found) return found;
+
+        // 2. Exact slug match
+        found = candidateArticles.find(a => a.slug && a.slug.trim() === decoded);
+        if (found) return found;
+
+        // 3. Normalized slug match (if multiple, pick highest seriesPart or newest)
+        const slugMatches = candidateArticles.filter(a => a.slug && normalize(a.slug) === normalizedTarget);
+        if (slugMatches.length === 1) return slugMatches[0];
+        if (slugMatches.length > 1) {
+          return slugMatches.find(a => a.isFeatured && a.featuredOrder === 1) 
+            || slugMatches.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+        }
+
+        // 4. Subtitle match
+        found = candidateArticles.find(a => a.subtitle && normalize(a.subtitle).includes(normalizedTarget));
+        if (found) return found;
+
+        // 5. Title match as fallback
+        const titleMatches = candidateArticles.filter(a => a.title && normalize(a.title) === normalizedTarget);
+        if (titleMatches.length === 1) return titleMatches[0];
+        if (titleMatches.length > 1) {
+          return titleMatches.find(a => a.isFeatured && a.featuredOrder === 1) 
+            || titleMatches.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
         }
       }
     }
@@ -1130,7 +1161,8 @@ ${combinedText.slice(0, 10000)}
         if (article) {
           const title = article.seoTitle || `${article.title} — The Oligarchy`;
           const desc = article.seoDescription || article.excerpt || "An independent peer-reviewed and scholarly archive dedicated to investigating criminology, criminal psychology, and political power systems.";
-          const image = article.featuredImage || "https://theoligarchy.in/logo_highres.png";
+          const rawImage = article.coverImageUrl || article.coverImage || article.featuredImage || '';
+          const image = (rawImage && rawImage.startsWith('http')) ? rawImage : "https://theoligarchy.in/logo_highres.png";
           
           const host = req.get('host') || 'www.crimeledger.org';
           const protocol = req.secure ? 'https' : 'http';
@@ -1181,7 +1213,12 @@ ${combinedText.slice(0, 10000)}
         html = html.replace('<head>', '<head>' + wsSuppressionScript);
       }
 
-      res.status(200).set({ 'Content-Type': 'text/html' }).send(html);
+      res.status(200).set({
+        'Content-Type': 'text/html',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }).send(html);
     } catch (e) {
       if (!isProd && vite) {
         vite.ssrFixStacktrace(e as Error);

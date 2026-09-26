@@ -184,7 +184,7 @@ export default function MarginaliaPanel({
             animate={{ opacity: 0.5 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black z-[990]"
+            className="fixed inset-0 bg-black z-[990] no-print"
           />
 
           {/* Slide-out Sidebar */}
@@ -193,7 +193,8 @@ export default function MarginaliaPanel({
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed right-0 top-0 bottom-0 w-full sm:max-w-md md:max-w-lg bg-[#0c0c0c] border-l border-paper/10 shadow-2xl z-[991] flex flex-col h-screen overflow-hidden"
+            className="fixed right-0 top-0 bottom-0 w-full sm:max-w-md md:max-w-lg bg-[#0c0c0c] border-l border-paper/10 shadow-2xl z-[991] flex flex-col h-screen overflow-hidden no-print"
+            id="marginalia-panel"
           >
             {/* Upper Header */}
             <div className="p-5 border-b border-paper/10 bg-midnight flex items-center justify-between">
